@@ -1,0 +1,10 @@
+[project]
+name = "circle-seeker-rl"
+version = "0.1.0"
+description = "Simple 2D circle-seeking reinforcement learning environment prototype."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pygame>=2.5",
+]

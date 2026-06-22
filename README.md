@@ -6,23 +6,23 @@ Un agent controle un petit cercle bleu vu de dessus. Il doit atteindre une cible
 
 Cette version ne contient pas encore d'entrainement RL ni de reseau de neurones. Le but est de poser une base claire : environnement, visualisation pygame, controle manuel et API proche de Gymnasium.
 
-## Installation
+## Installation avec uv
 
 Prerequis :
 
 - Python 3.11+
-- pip
+- uv
 
-Installe les dependances :
+Cree le `.venv` local et installe les dependances :
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
 
 ## Lancer le mode manuel
 
 ```bash
-python src/manual_play.py
+uv run python src/manual_play.py
 ```
 
 Controles :
@@ -34,7 +34,14 @@ Controles :
 ## Lancer la politique aleatoire
 
 ```bash
-python src/random_play.py
+uv run python src/random_play.py
+```
+
+## Verification rapide
+
+```bash
+uv run python -m compileall src
+uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs = env.reset(seed=123); print(obs.shape); print(env.step(0))'
 ```
 
 ## API de l'environnement
