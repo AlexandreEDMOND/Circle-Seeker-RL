@@ -135,6 +135,7 @@ Observation vector:
 │   └── random_play.py
 ├── tests/
 │   └── test_env.py
+├── LICENSE
 ├── pyproject.toml
 ├── requirements.txt
 ├── uv.lock
@@ -160,9 +161,16 @@ Not included yet:
 - neural network training
 - saved experiment tracking
 
-## Possible Next Steps
+## Roadmap
+
+Planned improvements:
 
 - Wrap `CircleSeekEnv` as a real `gymnasium.Env`.
-- Add deterministic evaluation scripts.
-- Add Stable-Baselines3 training with PPO.
-- Save training curves and example videos.
+- Add deterministic evaluation scripts and baseline metrics.
+- Train a first PPO agent with Stable-Baselines3.
+- Save training curves and example gameplay videos.
+- Add a README preview GIF once the training loop is available.
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.
