@@ -75,6 +75,7 @@ class CircleSeekEnv:
         )
 
         self.obstacles = []
+        self.target_position = np.zeros(2, dtype=np.float32)
         self.target_position = self._sample_free_position(self.target_radius)
         for _ in range(self.obstacle_count):
             position = self._sample_free_position(self.obstacle_radius)

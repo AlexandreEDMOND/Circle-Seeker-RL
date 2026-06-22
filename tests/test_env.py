@@ -15,6 +15,15 @@ def test_reset_returns_stable_observation_shape() -> None:
     assert env.status == "running"
 
 
+def test_reset_is_deterministic_for_same_seed() -> None:
+    env = CircleSeekEnv(obstacle_count=2)
+
+    observation_a = env.reset(seed=123)
+    observation_b = env.reset(seed=123)
+
+    np.testing.assert_array_equal(observation_a, observation_b)
+
+
 def test_step_moves_agent_and_returns_gymnasium_like_tuple() -> None:
     env = CircleSeekEnv(obstacle_count=0, approach_bonus=False)
     env.reset(seed=123)

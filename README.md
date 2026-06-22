@@ -2,7 +2,8 @@
 
 [![CI](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml)
 
-Circle Seeker RL is a small Python reinforcement learning environment prototype.
+Circle Seeker RL is a small Python reinforcement learning project focused on
+implementing Proximal Policy Optimization (PPO) on a custom 2D environment.
 
 An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. This first version focuses on clean environment mechanics, visual debugging, and a Gymnasium-like API. It does not train a model yet.
 
@@ -12,7 +13,9 @@ An agent moves in a top-down 2D world and must reach a green circular target whi
 - Keep the API close to Gymnasium: `reset()`, `step()`, observations, rewards, `terminated`, `truncated`, and `info`.
 - Provide a pygame renderer to inspect the simulation.
 - Support manual keyboard control and a random policy baseline.
-- Keep the codebase easy to extend later with Gymnasium and Stable-Baselines3.
+- Implement PPO from the research paper before comparing against library baselines.
+- Keep the codebase small enough that the PPO objective, advantage estimation,
+  rollout collection, and evaluation loop remain easy to inspect.
 
 ## Preview
 
@@ -83,13 +86,19 @@ uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs 
 ## Environment API
 
 Main class: `CircleSeekEnv` in `src/env.py`.
+Gymnasium adapter: `CircleSeekGymEnv` in `src/gym_env.py`.
 
 ```python
 from src.env import CircleSeekEnv
+from src.gym_env import CircleSeekGymEnv
 
 env = CircleSeekEnv()
 observation = env.reset(seed=123)
 observation, reward, terminated, truncated, info = env.step(0)
+
+gym_env = CircleSeekGymEnv()
+observation, info = gym_env.reset(seed=123)
+observation, reward, terminated, truncated, info = gym_env.step(0)
 ```
 
 Actions:
@@ -130,11 +139,19 @@ Observation vector:
 ├── src/
 │   ├── __init__.py
 │   ├── env.py
+│   ├── gym_env.py
 │   ├── renderer.py
 │   ├── manual_play.py
 │   └── random_play.py
 ├── tests/
 │   └── test_env.py
+├── research/
+│   └── Papier de recherche IA/
+│       ├── Attention is all you need.pdf
+│       ├── DeepSeekk-R1.pdf
+│       └── Proximal Policy Optimization Algorithms.pdf
+├── ROADMAP.md
+├── TODO.md
 ├── LICENSE
 ├── pyproject.toml
 ├── requirements.txt
@@ -150,26 +167,33 @@ Implemented:
 - moving circular obstacles with wall bounce
 - reward function and episode termination
 - numeric observations for future RL training
+- Gymnasium adapter with explicit observation and action spaces
 - pygame visualization
 - manual and random-play scripts
 - unit tests and GitHub Actions CI
+- local research paper copies under `research/Papier de recherche IA/`
 
 Not included yet:
 
 - Gymnasium inheritance
-- Stable-Baselines3 integration
-- neural network training
+- PPO rollout buffer
+- policy/value neural networks
+- clipped surrogate objective and GAE
+- training and evaluation scripts
 - saved experiment tracking
+
+## Research References
+
+The copied research files are under `research/Papier de recherche IA/`.
+The PPO implementation target is:
+
+- `research/Papier de recherche IA/Proximal Policy Optimization Algorithms.pdf`
 
 ## Roadmap
 
-Planned improvements:
+The implementation roadmap now targets a from-scratch PPO implementation for this environment.
 
-- Wrap `CircleSeekEnv` as a real `gymnasium.Env`.
-- Add deterministic evaluation scripts and baseline metrics.
-- Train a first PPO agent with Stable-Baselines3.
-- Save training curves and example gameplay videos.
-- Add a README preview GIF once the training loop is available.
+See `ROADMAP.md` for the staged plan and `TODO.md` for the current task list.
 
 ## License
 
