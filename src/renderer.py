@@ -2,14 +2,23 @@ from __future__ import annotations
 
 import pygame
 
-from env import CircleSeekEnv
+try:
+    from .env import CircleSeekEnv
+except ImportError:
+    from env import CircleSeekEnv
 
 
 class CircleSeekRenderer:
-    def __init__(self, env: CircleSeekEnv, fps: int = 60) -> None:
+    def __init__(
+        self,
+        env: CircleSeekEnv,
+        fps: int = 60,
+        controls_text: str = "arrows: move | R: reset | ESC: quit",
+    ) -> None:
         pygame.init()
         self.env = env
         self.fps = fps
+        self.controls_text = controls_text
         self.screen = pygame.display.set_mode((env.width, env.height))
         pygame.display.set_caption("Circle Seeker RL")
         self.clock = pygame.time.Clock()
@@ -60,7 +69,7 @@ class CircleSeekRenderer:
             f"total reward: {total_reward:.3f}",
             f"distance: {self.env.distance_to_target():.1f}",
             f"status: {self.env.status}",
-            "arrows: move | R: reset | ESC: quit",
+            self.controls_text,
         ]
 
         x = 12

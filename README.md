@@ -69,6 +69,13 @@ Baseline evaluation:
 uv run python -m src.evaluate_baselines --episodes 100 --seed 123
 ```
 
+Visual baseline playback:
+
+```bash
+uv run python -m src.watch_baseline --policy heuristic --seed 123
+uv run python -m src.watch_baseline --policy random --seed 123
+```
+
 Save baseline metrics to disk:
 
 ```bash
