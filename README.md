@@ -1,83 +1,168 @@
 # Circle Seeker RL
 
-Premiere ebauche d'un environnement 2D pour du Reinforcement Learning en Python.
+[![CI](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml)
 
-Un agent controle un petit cercle bleu vu de dessus. Il doit atteindre une cible verte placee aleatoirement, tout en evitant des obstacles rouges mobiles qui rebondissent sur les murs.
+Circle Seeker RL is a small Python reinforcement learning environment prototype.
 
-Cette version ne contient pas encore d'entrainement RL ni de reseau de neurones. Le but est de poser une base claire : environnement, visualisation pygame, controle manuel et API proche de Gymnasium.
+An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. This first version focuses on clean environment mechanics, visual debugging, and a Gymnasium-like API. It does not train a model yet.
 
-## Installation avec uv
+## Project Goals
 
-Prerequis :
+- Build a simple, readable RL environment from scratch.
+- Keep the API close to Gymnasium: `reset()`, `step()`, observations, rewards, `terminated`, `truncated`, and `info`.
+- Provide a pygame renderer to inspect the simulation.
+- Support manual keyboard control and a random policy baseline.
+- Keep the codebase easy to extend later with Gymnasium and Stable-Baselines3.
+
+## Preview
+
+The pygame window displays:
+
+- blue circle: agent
+- green circle: target
+- red circles: moving obstacles
+- HUD: current step, reward, cumulative reward, distance to target, episode status
+
+## Installation
+
+Prerequisites:
 
 - Python 3.11+
 - uv
 
-Cree le `.venv` local et installe les dependances :
+Create the local virtual environment and install dependencies:
 
 ```bash
 uv sync
 ```
 
-## Lancer le mode manuel
+This creates a local `.venv` and installs the dependencies from `pyproject.toml` / `uv.lock`.
+
+If you prefer pip, the same runtime dependencies are also listed in `requirements.txt`.
+
+## Run
+
+Manual control:
 
 ```bash
 uv run python src/manual_play.py
 ```
 
-Controles :
+Controls:
 
-- Fleches : deplacer l'agent
-- R : reset l'environnement
-- ESC : quitter
+- Arrow keys: move the agent
+- `R`: reset the environment
+- `ESC`: quit
 
-## Lancer la politique aleatoire
+Random policy:
 
 ```bash
 uv run python src/random_play.py
 ```
 
-## Verification rapide
+## Test
+
+Run the full test suite:
+
+```bash
+uv run pytest
+```
+
+Run a quick source compilation check:
 
 ```bash
 uv run python -m compileall src
-uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs = env.reset(seed=123); print(obs.shape); print(env.step(0))'
 ```
 
-## API de l'environnement
+Run a small environment smoke test:
 
-La classe principale est `CircleSeekEnv` dans `src/env.py`.
+```bash
+uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs = env.reset(seed=123); print(obs.shape); print(env.step(0)[1:])'
+```
 
-Actions :
+## Environment API
 
-- `0` : noop
-- `1` : up
-- `2` : down
-- `3` : left
-- `4` : right
+Main class: `CircleSeekEnv` in `src/env.py`.
 
-Methodes principales :
+```python
+from src.env import CircleSeekEnv
 
-- `reset(seed=None) -> observation`
-- `step(action) -> observation, reward, terminated, truncated, info`
-- `get_observation() -> observation`
+env = CircleSeekEnv()
+observation = env.reset(seed=123)
+observation, reward, terminated, truncated, info = env.step(0)
+```
 
-Recompenses :
+Actions:
 
-- `+10` si l'agent atteint la cible
-- `-10` si l'agent touche un obstacle
-- `-0.01` a chaque step
-- petit bonus si l'agent se rapproche de la cible
+| Action | Meaning |
+| --- | --- |
+| `0` | no-op |
+| `1` | up |
+| `2` | down |
+| `3` | left |
+| `4` | right |
 
-Observation numerique :
+Episode endings:
 
-- position normalisee de l'agent
-- position relative de la cible par rapport a l'agent
-- pour chaque obstacle : position relative et vitesse
-- distance normalisee a la cible
+- `success`: the agent reaches the target
+- `collision`: the agent touches an obstacle
+- `timeout`: the maximum number of steps is reached
 
-## Prochaines etapes possibles
+Rewards:
 
-- Ajouter des tests unitaires sur les collisions et les rewards.
-- Ajouter une classe compatible directement avec `gymnasium.Env`.
-- Brancher une politique RL avec Stable-Baselines3 plus tard.
+- `+10` for reaching the target
+- `-10` for colliding with an obstacle
+- `-0.01` step penalty
+- optional small shaping bonus when moving closer to the target
+
+Observation vector:
+
+- normalized agent position
+- target position relative to the agent
+- for each obstacle: relative position and velocity
+- normalized distance to target
+
+## Repository Structure
+
+```text
+.
+├── .github/workflows/ci.yml
+├── src/
+│   ├── __init__.py
+│   ├── env.py
+│   ├── renderer.py
+│   ├── manual_play.py
+│   └── random_play.py
+├── tests/
+│   └── test_env.py
+├── pyproject.toml
+├── requirements.txt
+├── uv.lock
+└── README.md
+```
+
+## Current Scope
+
+Implemented:
+
+- 2D environment mechanics
+- moving circular obstacles with wall bounce
+- reward function and episode termination
+- numeric observations for future RL training
+- pygame visualization
+- manual and random-play scripts
+- unit tests and GitHub Actions CI
+
+Not included yet:
+
+- Gymnasium inheritance
+- Stable-Baselines3 integration
+- neural network training
+- saved experiment tracking
+
+## Possible Next Steps
+
+- Wrap `CircleSeekEnv` as a real `gymnasium.Env`.
+- Add deterministic evaluation scripts.
+- Add Stable-Baselines3 training with PPO.
+- Save training curves and example videos.
