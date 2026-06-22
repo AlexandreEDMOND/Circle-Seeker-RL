@@ -23,9 +23,9 @@
 
 ## Baselines
 
-- [ ] Add a random-policy evaluation script.
-- [ ] Add a target-seeking heuristic baseline.
-- [ ] Record baseline metrics: success rate, collision rate, timeout rate, mean return, and mean episode length.
+- [x] Add a random-policy evaluation script.
+- [x] Add a target-seeking heuristic baseline.
+- [x] Record baseline metrics: success rate, collision rate, timeout rate, mean return, and mean episode length.
 
 ## PPO Implementation
 

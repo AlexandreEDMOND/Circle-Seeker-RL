@@ -63,6 +63,18 @@ Random policy:
 uv run python src/random_play.py
 ```
 
+Baseline evaluation:
+
+```bash
+uv run python -m src.evaluate_baselines --episodes 100 --seed 123
+```
+
+Save baseline metrics to disk:
+
+```bash
+uv run python -m src.evaluate_baselines --episodes 100 --seed 123 --output results/baselines.json
+```
+
 ## Test
 
 Run the full test suite:
@@ -168,6 +180,7 @@ Implemented:
 - reward function and episode termination
 - numeric observations for future RL training
 - Gymnasium adapter with explicit observation and action spaces
+- random and target-seeking heuristic baseline evaluation
 - pygame visualization
 - manual and random-play scripts
 - unit tests and GitHub Actions CI
