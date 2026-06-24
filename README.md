@@ -3,7 +3,8 @@
 [![CI](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/AlexandreEDMOND/Circle-Seeker-RL/actions/workflows/ci.yml)
 
 Circle Seeker RL is a small Python reinforcement learning project focused on
-implementing Proximal Policy Optimization (PPO) on a custom 2D environment.
+implementing Proximal Policy Optimization (PPO) from the paper on a custom 2D
+environment.
 
 An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. This first version focuses on clean environment mechanics, visual debugging, and a Gymnasium-like API. It does not train a model yet.
 
@@ -13,7 +14,7 @@ An agent moves in a top-down 2D world and must reach a green circular target whi
 - Keep the API close to Gymnasium: `reset()`, `step()`, observations, rewards, `terminated`, `truncated`, and `info`.
 - Provide a pygame renderer to inspect the simulation.
 - Support manual keyboard control and a random policy baseline.
-- Implement PPO from the research paper before comparing against library baselines.
+- Implement PPO from the original paper before comparing against library baselines.
 - Keep the codebase small enough that the PPO objective, advantage estimation,
   rollout collection, and evaluation loop remain easy to inspect.
 
@@ -164,11 +165,8 @@ Observation vector:
 │   └── random_play.py
 ├── tests/
 │   └── test_env.py
-├── research/
-│   └── Papier de recherche IA/
-│       ├── Attention is all you need.pdf
-│       ├── DeepSeekk-R1.pdf
-│       └── Proximal Policy Optimization Algorithms.pdf
+├── paper/
+│   └── Proximal Policy Optimization Algorithms.pdf
 ├── ROADMAP.md
 ├── TODO.md
 ├── LICENSE
@@ -191,7 +189,7 @@ Implemented:
 - pygame visualization
 - manual and random-play scripts
 - unit tests and GitHub Actions CI
-- local research paper copies under `research/Papier de recherche IA/`
+- local PPO paper copy under `paper/`
 
 Not included yet:
 
@@ -202,12 +200,12 @@ Not included yet:
 - training and evaluation scripts
 - saved experiment tracking
 
-## Research References
+## Paper Reference
 
-The copied research files are under `research/Papier de recherche IA/`.
+The copied paper file is under `paper/`.
 The PPO implementation target is:
 
-- `research/Papier de recherche IA/Proximal Policy Optimization Algorithms.pdf`
+- `paper/Proximal Policy Optimization Algorithms.pdf`
 
 ## Roadmap
 

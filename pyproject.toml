@@ -1,7 +1,7 @@
 [project]
 name = "circle-seeker-rl"
 version = "0.1.0"
-description = "Simple 2D circle-seeking reinforcement learning environment prototype."
+description = "From-scratch PPO implementation from the paper on a 2D circle-seeking RL environment."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"

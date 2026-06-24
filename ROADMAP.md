@@ -1,7 +1,7 @@
 # Roadmap
 
 This roadmap is focused on implementing PPO from the paper
-`research/Papier de recherche IA/Proximal Policy Optimization Algorithms.pdf`
+`paper/Proximal Policy Optimization Algorithms.pdf`
 and using Circle Seeker as the first training environment.
 
 ## Phase 1: Environment Contract

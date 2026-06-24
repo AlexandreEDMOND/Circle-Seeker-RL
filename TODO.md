@@ -1,8 +1,8 @@
 # TODO
 
-## Research Setup
+## Paper Setup
 
-- [x] Copy the research paper folder into the repository.
+- [x] Copy the PPO paper into the repository.
 - [x] Identify `Proximal Policy Optimization Algorithms.pdf` as the main implementation target.
 - [ ] Read the PPO paper and extract implementation requirements:
   - clipped surrogate objective
