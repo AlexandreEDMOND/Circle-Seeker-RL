@@ -25,7 +25,7 @@ class CircleSeekGymEnv(gym.Env):
             shape=(observation_size,),
             dtype=np.float32,
         )
-        self.action_space = spaces.Discrete(len(CircleSeekEnv.ACTIONS))
+        self.action_space = spaces.MultiBinary(CircleSeekEnv.ACTION_SIZE)
 
     def reset(
         self,
@@ -37,6 +37,6 @@ class CircleSeekGymEnv(gym.Env):
         observation = self.env.reset(seed=seed)
         return observation, self.env._info()
 
-    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
-        observation, reward, terminated, truncated, info = self.env.step(int(action))
+    def step(self, action: np.ndarray) -> tuple[np.ndarray, float, bool, bool, dict[str, Any]]:
+        observation, reward, terminated, truncated, info = self.env.step(action)
         return observation, reward, terminated, truncated, info

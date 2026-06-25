@@ -6,7 +6,7 @@ Circle Seeker RL is a small Python reinforcement learning project focused on
 implementing Proximal Policy Optimization (PPO) from the paper on a custom 2D
 environment.
 
-An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. The project includes clean environment mechanics, visual debugging, baseline policies, and a compact from-scratch PPO training pipeline.
+An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red polygon obstacles. The agent has its own oriented cone of vision: it can see to the environment bounds, but polygon obstacles block line of sight. The project includes clean environment mechanics, visual debugging, baseline policies, and early from-scratch PPO components.
 
 ## Project Goals
 
@@ -24,7 +24,8 @@ The pygame window displays:
 
 - blue circle: agent
 - green circle: target
-- red circles: moving obstacles
+- red polygons: moving obstacles
+- translucent blue cone: agent field of vision
 - HUD: current step, reward, cumulative reward, distance to target, episode status
 
 ![Circle Seeker RL environment](docs/media/environment.png)
@@ -69,7 +70,8 @@ uv run python src/manual_play.py
 
 Controls:
 
-- Arrow keys: move the agent
+- Arrow keys: move the agent, including diagonal movement when multiple keys are held
+- `A` / `D`: rotate the agent's vision direction
 - `R`: reset the environment
 - `ESC`: quit
 
@@ -116,28 +118,12 @@ Visual PPO playback:
 uv run python -m src.watch_ppo checkpoints/ppo.pt --seed 123
 ```
 
-For quick debugging, start with an easier no-obstacle run:
+For an easier first PPO run, train without obstacles and allow closer target spawns:
 
 ```bash
-uv run python -m src.train_ppo --total-timesteps 50000 --obstacle-count 0 --max-steps 300 --checkpoint checkpoints/ppo_simple.pt
-uv run python -m src.evaluate_ppo checkpoints/ppo_simple.pt --episodes 50
-```
-
-Train with curriculum learning:
-
-```bash
-uv run python -m src.train_ppo --curriculum --curriculum-stages 4 --total-timesteps 100000 --obstacle-count 4 --checkpoint checkpoints/ppo_curriculum.pt
-uv run python -m src.evaluate_ppo checkpoints/ppo_curriculum.pt --episodes 50
-```
-
-The curriculum keeps the number of obstacle observation slots fixed and gradually
-increases obstacle radius and speed. This avoids changing the neural network
-input size during training.
-
-Regenerate README media from a trained checkpoint:
-
-```bash
-uv run python scripts/generate_readme_media.py --checkpoint checkpoints/ppo_curriculum.pt --output-dir docs/media --seed 134 --gif-frames 200
+uv run python -m src.train_ppo --total-timesteps 50000 --rollout-steps 1024 --update-epochs 4 --minibatch-size 128 --obstacle-count 0 --max-steps 300 --min-target-distance 80 --distance-reward-coef 0.2 --target-visible-reward-coef 0.02 --target-found-reward-coef 0.2 --no-vision-no-turn-penalty 0.005 --action-conflict-penalty 0.02 --checkpoint checkpoints/ppo_simple.pt
+uv run python -m src.evaluate_ppo checkpoints/ppo_simple.pt --episodes 20 --seed 456
+uv run python -m src.watch_ppo checkpoints/ppo_simple.pt --seed 123
 ```
 
 ## Test
@@ -157,7 +143,7 @@ uv run python -m compileall src
 Run a small environment smoke test:
 
 ```bash
-uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs = env.reset(seed=123); print(obs.shape); print(env.step(0)[1:])'
+uv run python -c 'from src.env import CircleSeekEnv; env = CircleSeekEnv(); obs = env.reset(seed=123); print(obs.shape); print(env.step(CircleSeekEnv.ACTION_NOOP)[1:])'
 ```
 
 ## Environment API
@@ -171,22 +157,25 @@ from src.gym_env import CircleSeekGymEnv
 
 env = CircleSeekEnv()
 observation = env.reset(seed=123)
-observation, reward, terminated, truncated, info = env.step(0)
+observation, reward, terminated, truncated, info = env.step(CircleSeekEnv.ACTION_NOOP)
 
 gym_env = CircleSeekGymEnv()
 observation, info = gym_env.reset(seed=123)
-observation, reward, terminated, truncated, info = gym_env.step(0)
+observation, reward, terminated, truncated, info = gym_env.step(CircleSeekEnv.ACTION_NOOP)
 ```
 
 Actions:
 
-| Action | Meaning |
+The environment uses a 6-bit `MultiBinary` action vector so movement and orientation can happen at the same time.
+
+| Index | Meaning |
 | --- | --- |
-| `0` | no-op |
-| `1` | up |
-| `2` | down |
-| `3` | left |
-| `4` | right |
+| `0` | move up |
+| `1` | move down |
+| `2` | move left |
+| `3` | move right |
+| `4` | turn vision left |
+| `5` | turn vision right |
 
 Episode endings:
 
@@ -203,10 +192,11 @@ Rewards:
 
 Observation vector:
 
-- normalized agent position
-- target position relative to the agent
-- for each obstacle: relative position and velocity
-- normalized distance to target
+- normalized ray distances across the agent's vision cone
+- target visibility flag
+- target angle relative to the agent's orientation, only when visible
+- normalized distance to target, only when visible
+- agent orientation as `cos(theta), sin(theta)`
 
 ## Repository Structure
 
@@ -250,22 +240,25 @@ Observation vector:
 Implemented:
 
 - 2D environment mechanics
-- moving circular obstacles with wall bounce
+- moving polygon obstacles with wall and obstacle-to-obstacle bounce
+- oriented cone-of-vision raycasting with obstacle occlusion
+- minimum spawn distance between agent and target
 - reward function and episode termination
-- numeric observations for future RL training
+- partial numeric observations for future RL training
 - Gymnasium adapter with explicit observation and action spaces
 - random and target-seeking heuristic baseline evaluation
-- from-scratch PPO actor-critic implementation with rollout buffer, GAE,
-  clipped policy objective, value loss, entropy bonus, and checkpoint saving
-- PPO training, curriculum training, evaluation, and visual playback scripts
+- from-scratch PPO actor-critic implementation with rollout buffer, GAE returns,
+  environment rollout collection, clipped policy objective, value loss, entropy
+  bonus, mini-batch updates, checkpoint saving, and checkpoint evaluation
 - pygame visualization
 - manual and random-play scripts
+- PyTorch actor-critic model
+- PPO rollout buffer with GAE returns and advantages
 - unit tests and GitHub Actions CI
 - local PPO paper copy under `paper/`
 
 Not included yet:
 
-- Gymnasium inheritance
 - vectorized environments
 - advanced experiment tracking
 - tuned hyperparameters for the obstacle-heavy task

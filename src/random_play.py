@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pygame
+import numpy as np
 
 from env import CircleSeekEnv
 from renderer import CircleSeekRenderer
@@ -26,7 +27,7 @@ def main() -> None:
                     total_reward = 0.0
 
         if env.status == "running":
-            action = int(env.rng.integers(0, 5))
+            action = env.rng.integers(0, 2, size=CircleSeekEnv.ACTION_SIZE, dtype=np.int8)
             _, reward, _, _, _ = env.step(action)
             total_reward += reward
 

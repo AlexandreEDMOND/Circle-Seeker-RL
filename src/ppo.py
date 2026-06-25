@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import Categorical
+from torch.distributions import Bernoulli
 
 from src.gym_env import CircleSeekGymEnv
 
@@ -24,13 +24,18 @@ class PPOConfig:
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     distance_reward_coef: float = 0.05
+    action_conflict_penalty: float = 0.02
+    target_visible_reward_coef: float = 0.02
+    target_found_reward_coef: float = 0.2
+    no_vision_no_turn_penalty: float = 0.005
     learning_rate: float = 3e-4
     max_grad_norm: float = 0.5
     hidden_size: int = 64
     seed: int = 123
     obstacle_count: int = 4
     obstacle_speed: float = 2.5
-    obstacle_radius: float = 16.0
+    obstacle_radius: float = 36.0
+    min_target_distance: float = 200.0
     max_steps: int = 600
     curriculum: bool = False
     curriculum_stages: int = 4
@@ -39,78 +44,419 @@ class PPOConfig:
 
 
 class ActorCritic(nn.Module):
-    def __init__(self, observation_dim: int, action_dim: int, hidden_size: int = 64) -> None:
+    """Shared MLP actor-critic for a multi-binary action space."""
+
+    def __init__(
+        self,
+        observation_size: int,
+        action_count: int,
+        hidden_size: int = 64,
+    ) -> None:
         super().__init__()
-        self.policy_net = nn.Sequential(
-            nn.Linear(observation_dim, hidden_size),
+        self.shared = nn.Sequential(
+            nn.Linear(observation_size, hidden_size),
             nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
-            nn.Linear(hidden_size, action_dim),
         )
-        self.value_net = nn.Sequential(
-            nn.Linear(observation_dim, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, hidden_size),
-            nn.Tanh(),
-            nn.Linear(hidden_size, 1),
-        )
+        self.policy_head = nn.Linear(hidden_size, action_count)
+        self.value_head = nn.Linear(hidden_size, 1)
 
-    def distribution(self, observations: torch.Tensor) -> Categorical:
-        return Categorical(logits=self.policy_net(observations))
+    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        features = self.shared(observations)
+        logits = self.policy_head(features)
+        values = self.value_head(features).squeeze(-1)
+        return logits, values
 
-    def value(self, observations: torch.Tensor) -> torch.Tensor:
-        return self.value_net(observations).squeeze(-1)
+    def get_action_and_value(
+        self,
+        observations: torch.Tensor,
+        actions: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        logits, values = self(observations)
+        distribution = Bernoulli(logits=logits)
 
-    def act(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        distribution = self.distribution(observations)
-        actions = distribution.sample()
-        return actions, distribution.log_prob(actions), self.value(observations)
+        if actions is None:
+            actions = distribution.sample()
+        else:
+            actions = actions.to(dtype=torch.float32)
+
+        log_probs = distribution.log_prob(actions).sum(dim=-1)
+        entropy = distribution.entropy().sum(dim=-1)
+        return actions, log_probs, entropy, values
 
 
 class RolloutBuffer:
-    def __init__(self, steps: int, observation_dim: int) -> None:
-        self.observations = torch.zeros((steps, observation_dim), dtype=torch.float32)
-        self.actions = torch.zeros(steps, dtype=torch.long)
-        self.log_probs = torch.zeros(steps, dtype=torch.float32)
-        self.rewards = torch.zeros(steps, dtype=torch.float32)
-        self.dones = torch.zeros(steps, dtype=torch.float32)
-        self.values = torch.zeros(steps, dtype=torch.float32)
-        self.advantages = torch.zeros(steps, dtype=torch.float32)
-        self.returns = torch.zeros(steps, dtype=torch.float32)
+    """Fixed-size rollout storage for one environment."""
+
+    def __init__(
+        self,
+        rollout_length: int,
+        observation_size: int,
+        action_size: int = 1,
+        device: torch.device | str = "cpu",
+    ) -> None:
+        if rollout_length <= 0:
+            raise ValueError("rollout_length must be positive.")
+
+        self.rollout_length = rollout_length
+        self.observation_size = observation_size
+        self.action_size = action_size
+        self.device = torch.device(device)
+        self.observations = torch.zeros(
+            (rollout_length, observation_size),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.actions = torch.zeros(
+            (rollout_length, action_size),
+            dtype=torch.float32,
+            device=self.device,
+        )
+        self.rewards = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.dones = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.values = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.log_probs = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.advantages = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.returns = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
+        self.step = 0
+
+    @property
+    def is_full(self) -> bool:
+        return self.step == self.rollout_length
+
+    def add(
+        self,
+        observation: torch.Tensor,
+        action: Iterable[int | float | bool] | torch.Tensor,
+        reward: float | torch.Tensor,
+        done: bool | torch.Tensor,
+        value: float | torch.Tensor,
+        log_prob: float | torch.Tensor,
+    ) -> None:
+        if self.is_full:
+            raise RuntimeError("RolloutBuffer is full.")
+
+        observation = torch.as_tensor(
+            observation,
+            dtype=torch.float32,
+            device=self.device,
+        )
+        if observation.shape != (self.observation_size,):
+            raise ValueError(
+                f"Expected observation shape {(self.observation_size,)}, "
+                f"got {tuple(observation.shape)}."
+            )
+
+        action = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        if action.shape == ():
+            action = action.reshape(1)
+        if action.shape != (self.action_size,):
+            raise ValueError(
+                f"Expected action shape {(self.action_size,)}, got {tuple(action.shape)}."
+            )
+
+        self.observations[self.step].copy_(observation)
+        self.actions[self.step].copy_(action)
+        self.rewards[self.step] = self._scalar_tensor(reward, torch.float32)
+        self.dones[self.step] = self._scalar_tensor(done, torch.float32)
+        self.values[self.step] = self._scalar_tensor(value, torch.float32)
+        self.log_probs[self.step] = self._scalar_tensor(log_prob, torch.float32)
+        self.step += 1
+
+    def reset(self) -> None:
+        self.step = 0
 
     def compute_returns_and_advantages(
         self,
-        *,
-        last_value: torch.Tensor,
-        last_done: bool,
-        gamma: float,
-        gae_lambda: float,
-    ) -> None:
-        last_gae = torch.tensor(0.0)
-        next_value = last_value.detach().reshape(())
-        next_non_terminal = torch.tensor(0.0 if last_done else 1.0)
+        last_value: float | torch.Tensor,
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if not self.is_full:
+            raise RuntimeError("RolloutBuffer must be full before computing returns.")
 
-        for step in reversed(range(len(self.rewards))):
-            if step < len(self.rewards) - 1:
-                next_value = self.values[step + 1]
-                next_non_terminal = 1.0 - self.dones[step + 1]
+        last_value = torch.as_tensor(last_value, dtype=torch.float32, device=self.device)
+        last_gae = torch.zeros((), dtype=torch.float32, device=self.device)
 
+        for index in reversed(range(self.rollout_length)):
+            if index == self.rollout_length - 1:
+                next_value = last_value
+            else:
+                next_value = self.values[index + 1]
+
+            next_non_terminal = 1.0 - self.dones[index]
             delta = (
-                self.rewards[step]
+                self.rewards[index]
                 + gamma * next_value * next_non_terminal
-                - self.values[step]
+                - self.values[index]
             )
             last_gae = delta + gamma * gae_lambda * next_non_terminal * last_gae
-            self.advantages[step] = last_gae
+            self.advantages[index] = last_gae
 
-        self.returns = self.advantages + self.values
+        self.returns.copy_(self.advantages + self.values)
+        return self.returns, self.advantages
+
+    def _scalar_tensor(
+        self,
+        value: int | float | bool | torch.Tensor,
+        dtype: torch.dtype,
+    ) -> torch.Tensor:
+        return torch.as_tensor(value, dtype=dtype, device=self.device).reshape(())
+
+
+def action_conflict_count(action: Iterable[int | float | bool] | np.ndarray) -> int:
+    action_vector = np.asarray(action, dtype=np.int8).reshape(-1)
+    if action_vector.size < 6:
+        action_vector = np.pad(action_vector, (0, 6 - action_vector.size))
+    conflicts = 0
+    conflicts += int(action_vector[0] and action_vector[1])
+    conflicts += int(action_vector[2] and action_vector[3])
+    conflicts += int(action_vector[4] and action_vector[5])
+    return conflicts
+
+
+def action_turns(action: Iterable[int | float | bool] | np.ndarray) -> bool:
+    action_vector = np.asarray(action, dtype=np.int8).reshape(-1)
+    if action_vector.size < 6:
+        action_vector = np.pad(action_vector, (0, 6 - action_vector.size))
+    return bool(action_vector[4] or action_vector[5])
+
+
+def target_visibility_training_reward(
+    *,
+    target_visible: bool,
+    previous_target_visible: bool,
+    turning: bool,
+    visible_reward_coef: float,
+    found_reward_coef: float,
+    no_vision_no_turn_penalty: float,
+) -> float:
+    reward = visible_reward_coef if target_visible else 0.0
+    if target_visible and not previous_target_visible:
+        reward += found_reward_coef
+    if not target_visible and not turning:
+        reward -= no_vision_no_turn_penalty
+    return reward
+
+
+def collect_rollout(
+    model: ActorCritic,
+    rollout_length: int,
+    env: CircleSeekGymEnv | None = None,
+    *,
+    seed: int | None = None,
+    gamma: float = 0.99,
+    gae_lambda: float = 0.95,
+    device: torch.device | str = "cpu",
+    env_kwargs: dict | None = None,
+    distance_reward_coef: float = 0.0,
+    action_conflict_penalty: float = 0.0,
+    target_visible_reward_coef: float = 0.0,
+    target_found_reward_coef: float = 0.0,
+    no_vision_no_turn_penalty: float = 0.0,
+) -> tuple[RolloutBuffer, dict]:
+    """Collect one fixed-length rollout from CircleSeekGymEnv."""
+
+    if env is None:
+        env = CircleSeekGymEnv(**(env_kwargs or {}))
+
+    device = torch.device(device)
+    observation, reset_info = env.reset(seed=seed)
+    observation_size = int(env.observation_space.shape[0])
+    action_size = int(env.action_space.n)
+    buffer = RolloutBuffer(
+        rollout_length=rollout_length,
+        observation_size=observation_size,
+        action_size=action_size,
+        device=device,
+    )
+
+    previous_distance = float(reset_info["distance_to_target"])
+    previous_target_visible = bool(reset_info["target_visible"])
+    episode_initial_distance = previous_distance
+    episode_env_return = 0.0
+    episode_training_return = 0.0
+    episode_length = 0
+    episode_returns: list[float] = []
+    episode_training_returns: list[float] = []
+    episode_lengths: list[int] = []
+    episode_statuses: list[str] = []
+    initial_distances: list[float] = []
+    final_distances: list[float] = []
+    conflict_counts: list[int] = []
+    target_visible_steps = 0
+    target_found_steps = 0
+    turn_steps = 0
+    no_vision_no_turn_steps = 0
+
+    for _ in range(rollout_length):
+        observation_tensor = torch.as_tensor(
+            observation,
+            dtype=torch.float32,
+            device=device,
+        ).unsqueeze(0)
+
+        with torch.no_grad():
+            action_tensor, log_prob, _, value = model.get_action_and_value(observation_tensor)
+
+        action = action_tensor.squeeze(0).cpu().numpy().astype(np.int8)
+        next_observation, reward, terminated, truncated, step_info = env.step(action)
+        done = terminated or truncated
+        current_distance = float(step_info["distance_to_target"])
+        distance_delta = previous_distance - current_distance
+        conflict_count = action_conflict_count(action)
+        turning = action_turns(action)
+        target_visible = bool(step_info["target_visible"])
+        target_found = target_visible and not previous_target_visible
+        no_vision_no_turn = not target_visible and not turning
+        visibility_reward = target_visibility_training_reward(
+            target_visible=target_visible,
+            previous_target_visible=previous_target_visible,
+            turning=turning,
+            visible_reward_coef=target_visible_reward_coef,
+            found_reward_coef=target_found_reward_coef,
+            no_vision_no_turn_penalty=no_vision_no_turn_penalty,
+        )
+        training_reward = (
+            float(reward)
+            + distance_reward_coef * distance_delta / max(float(env.env.agent_speed), 1.0)
+            + visibility_reward
+            - action_conflict_penalty * conflict_count
+        )
+
+        buffer.add(
+            observation=observation,
+            action=action,
+            reward=training_reward,
+            done=done,
+            value=value.squeeze(0),
+            log_prob=log_prob.squeeze(0),
+        )
+
+        episode_env_return += float(reward)
+        episode_training_return += training_reward
+        episode_length += 1
+        conflict_counts.append(conflict_count)
+        target_visible_steps += int(target_visible)
+        target_found_steps += int(target_found)
+        turn_steps += int(turning)
+        no_vision_no_turn_steps += int(no_vision_no_turn)
+
+        if done:
+            episode_returns.append(float(episode_env_return))
+            episode_training_returns.append(float(episode_training_return))
+            episode_lengths.append(episode_length)
+            episode_statuses.append(str(step_info["status"]))
+            initial_distances.append(episode_initial_distance)
+            final_distances.append(current_distance)
+            episode_env_return = 0.0
+            episode_training_return = 0.0
+            episode_length = 0
+            next_observation, reset_info = env.reset()
+            previous_distance = float(reset_info["distance_to_target"])
+            previous_target_visible = bool(reset_info["target_visible"])
+            episode_initial_distance = previous_distance
+        else:
+            previous_distance = current_distance
+            previous_target_visible = target_visible
+
+        observation = next_observation
+
+    last_observation = torch.as_tensor(
+        observation,
+        dtype=torch.float32,
+        device=device,
+    ).unsqueeze(0)
+    with torch.no_grad():
+        _, last_value = model(last_observation)
+
+    buffer.compute_returns_and_advantages(
+        last_value=last_value.squeeze(0),
+        gamma=gamma,
+        gae_lambda=gae_lambda,
+    )
+
+    info = {
+        "steps": rollout_length,
+        "episodes": len(episode_returns),
+        "episode_returns": episode_returns,
+        "episode_training_returns": episode_training_returns,
+        "episode_lengths": episode_lengths,
+        "episode_statuses": episode_statuses,
+        "initial_distances": initial_distances,
+        "final_distances": final_distances,
+        "action_conflict_steps": sum(1 for count in conflict_counts if count > 0),
+        "action_conflicts": int(sum(conflict_counts)),
+        "target_visible_steps": target_visible_steps,
+        "target_found_steps": target_found_steps,
+        "turn_steps": turn_steps,
+        "no_vision_no_turn_steps": no_vision_no_turn_steps,
+        "last_value": float(last_value.squeeze(0).item()),
+    }
+    return buffer, info
+
+
+def compute_ppo_loss(
+    model: ActorCritic,
+    observations: torch.Tensor,
+    actions: torch.Tensor,
+    old_log_probs: torch.Tensor,
+    advantages: torch.Tensor,
+    returns: torch.Tensor,
+    *,
+    clip_coef: float = 0.2,
+    value_coef: float = 0.5,
+    entropy_coef: float = 0.01,
+) -> dict[str, torch.Tensor]:
+    """Compute PPO clipped objective terms for a Bernoulli multi-binary policy."""
+
+    _, new_log_probs, entropy, values = model.get_action_and_value(observations, actions)
+    ratio = (new_log_probs - old_log_probs).exp()
+
+    unclipped_policy_loss = ratio * advantages
+    clipped_policy_loss = torch.clamp(
+        ratio,
+        1.0 - clip_coef,
+        1.0 + clip_coef,
+    ) * advantages
+    policy_loss = -torch.min(unclipped_policy_loss, clipped_policy_loss).mean()
+    value_loss = 0.5 * (returns - values).pow(2).mean()
+    entropy_bonus = entropy.mean()
+    loss = policy_loss + value_coef * value_loss - entropy_coef * entropy_bonus
+
+    with torch.no_grad():
+        approx_kl = (old_log_probs - new_log_probs).mean()
+        clip_fraction = ((ratio - 1.0).abs() > clip_coef).float().mean()
+
+    return {
+        "loss": loss,
+        "policy_loss": policy_loss,
+        "value_loss": value_loss,
+        "entropy": entropy_bonus,
+        "approx_kl": approx_kl,
+        "clip_fraction": clip_fraction,
+    }
 
 
 def set_seed(seed: int) -> np.random.Generator:
     np.random.seed(seed)
     torch.manual_seed(seed)
     return np.random.default_rng(seed)
+
+
+def curriculum_stage(config: PPOConfig, global_step: int) -> tuple[int, float]:
+    if not config.curriculum:
+        return 0, 1.0
+
+    stage_count = max(config.curriculum_stages, 1)
+    stage_index = min(
+        int(global_step / max(config.total_timesteps, 1) * stage_count),
+        stage_count - 1,
+    )
+    if stage_count == 1:
+        return stage_index, 1.0
+    return stage_index, stage_index / (stage_count - 1)
 
 
 def build_env(config: PPOConfig, stage_progress: float | None = None) -> CircleSeekGymEnv:
@@ -131,22 +477,9 @@ def build_env(config: PPOConfig, stage_progress: float | None = None) -> CircleS
         obstacle_count=config.obstacle_count,
         obstacle_speed=obstacle_speed,
         obstacle_radius=obstacle_radius,
+        min_target_distance=config.min_target_distance,
         max_steps=config.max_steps,
     )
-
-
-def curriculum_stage(config: PPOConfig, global_step: int) -> tuple[int, float]:
-    if not config.curriculum:
-        return 0, 1.0
-
-    stage_count = max(config.curriculum_stages, 1)
-    stage_index = min(
-        int(global_step / max(config.total_timesteps, 1) * stage_count),
-        stage_count - 1,
-    )
-    if stage_count == 1:
-        return stage_index, 1.0
-    return stage_index, stage_index / (stage_count - 1)
 
 
 def select_action(
@@ -154,168 +487,160 @@ def select_action(
     observation: np.ndarray,
     *,
     deterministic: bool,
-) -> int:
+) -> np.ndarray:
     observation_tensor = torch.as_tensor(observation, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
-        distribution = model.distribution(observation_tensor)
         if deterministic:
-            action = torch.argmax(distribution.logits, dim=-1)
+            logits, _ = model(observation_tensor)
+            action = (logits.squeeze(0) >= 0.0).to(dtype=torch.int8)
         else:
-            action = distribution.sample()
-    return int(action.item())
+            action, _, _, _ = model.get_action_and_value(observation_tensor)
+            action = action.squeeze(0).to(dtype=torch.int8)
+    return action.cpu().numpy()
 
 
-def train_ppo(config: PPOConfig, checkpoint_path: Path | None = None) -> dict[str, Any]:
+def train_ppo(
+    config: PPOConfig,
+    checkpoint_path: Path | None = None,
+) -> dict[str, Any]:
     rng = set_seed(config.seed)
-    current_stage, stage_progress = curriculum_stage(config, 0)
+    _, stage_progress = curriculum_stage(config, 0)
     env = build_env(config, stage_progress)
-    observation_dim = int(env.observation_space.shape[0])
-    action_dim = int(env.action_space.n)
-    model = ActorCritic(observation_dim, action_dim, config.hidden_size)
+    observation_size = int(env.observation_space.shape[0])
+    action_size = int(env.action_space.n)
+    model = ActorCritic(observation_size, action_size, config.hidden_size)
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
 
-    observation, _ = env.reset(seed=config.seed)
-    previous_distance = env.env.distance_to_target()
-    done = False
     global_step = 0
-    episode_return = 0.0
-    episode_training_return = 0.0
-    episode_length = 0
     completed_returns: list[float] = []
     completed_training_returns: list[float] = []
     completed_lengths: list[int] = []
+    initial_distances: list[float] = []
+    final_distances: list[float] = []
+    total_action_conflict_steps = 0
+    total_action_conflicts = 0
+    total_target_visible_steps = 0
+    total_target_found_steps = 0
+    total_turn_steps = 0
+    total_no_vision_no_turn_steps = 0
     status_counts = {"success": 0, "collision": 0, "timeout": 0}
+    loss_history: dict[str, list[float]] = {
+        "policy_loss": [],
+        "value_loss": [],
+        "entropy": [],
+        "approx_kl": [],
+        "clip_fraction": [],
+    }
     stage_counts: list[dict[str, int]] = [
         {"stage": idx, "success": 0, "collision": 0, "timeout": 0}
         for idx in range(max(config.curriculum_stages if config.curriculum else 1, 1))
     ]
 
     while global_step < config.total_timesteps:
-        next_stage, stage_progress = curriculum_stage(config, global_step)
-        if next_stage != current_stage:
-            current_stage = next_stage
-            env = build_env(config, stage_progress)
-            observation, _ = env.reset(seed=config.seed + global_step)
-            previous_distance = env.env.distance_to_target()
-            done = False
-            episode_return = 0.0
-            episode_training_return = 0.0
-            episode_length = 0
-
+        stage_index, stage_progress = curriculum_stage(config, global_step)
+        env = build_env(config, stage_progress)
         rollout_size = min(config.rollout_steps, config.total_timesteps - global_step)
-        buffer = RolloutBuffer(rollout_size, observation_dim)
-
-        for step in range(rollout_size):
-            buffer.observations[step] = torch.as_tensor(observation, dtype=torch.float32)
-            buffer.dones[step] = float(done)
-
-            with torch.no_grad():
-                action, log_prob, value = model.act(buffer.observations[step].unsqueeze(0))
-
-            action_int = int(action.item())
-            next_observation, reward, terminated, truncated, info = env.step(action_int)
-            next_done = bool(terminated or truncated)
-            current_distance = float(info["distance_to_target"])
-            distance_delta = previous_distance - current_distance
-            training_reward = float(reward) + config.distance_reward_coef * (
-                distance_delta / max(env.env.agent_speed, 1.0)
-            )
-
-            buffer.actions[step] = action_int
-            buffer.log_probs[step] = log_prob.squeeze(0)
-            buffer.values[step] = value.squeeze(0)
-            buffer.rewards[step] = training_reward
-
-            episode_return += float(reward)
-            episode_training_return += training_reward
-            episode_length += 1
-            global_step += 1
-
-            if next_done:
-                status = str(info["status"])
-                status_counts[status] = status_counts.get(status, 0) + 1
-                if status in stage_counts[current_stage]:
-                    stage_counts[current_stage][status] += 1
-                completed_returns.append(episode_return)
-                completed_training_returns.append(episode_training_return)
-                completed_lengths.append(episode_length)
-                observation, _ = env.reset(seed=config.seed + global_step + int(rng.integers(10_000)))
-                previous_distance = env.env.distance_to_target()
-                episode_return = 0.0
-                episode_training_return = 0.0
-                episode_length = 0
-            else:
-                observation = next_observation
-                previous_distance = current_distance
-
-            done = next_done
-
-        with torch.no_grad():
-            last_observation = torch.as_tensor(observation, dtype=torch.float32).unsqueeze(0)
-            last_value = model.value(last_observation).squeeze(0)
-
-        buffer.compute_returns_and_advantages(
-            last_value=last_value,
-            last_done=done,
+        rollout_seed = config.seed + global_step + int(rng.integers(10_000))
+        buffer, rollout_info = collect_rollout(
+            model,
+            rollout_size,
+            env,
+            seed=rollout_seed,
             gamma=config.gamma,
             gae_lambda=config.gae_lambda,
+            distance_reward_coef=config.distance_reward_coef,
+            action_conflict_penalty=config.action_conflict_penalty,
+            target_visible_reward_coef=config.target_visible_reward_coef,
+            target_found_reward_coef=config.target_found_reward_coef,
+            no_vision_no_turn_penalty=config.no_vision_no_turn_penalty,
         )
+        global_step += rollout_size
+
+        completed_returns.extend(rollout_info["episode_returns"])
+        completed_training_returns.extend(rollout_info["episode_training_returns"])
+        completed_lengths.extend(rollout_info["episode_lengths"])
+        initial_distances.extend(rollout_info["initial_distances"])
+        final_distances.extend(rollout_info["final_distances"])
+        total_action_conflict_steps += int(rollout_info["action_conflict_steps"])
+        total_action_conflicts += int(rollout_info["action_conflicts"])
+        total_target_visible_steps += int(rollout_info["target_visible_steps"])
+        total_target_found_steps += int(rollout_info["target_found_steps"])
+        total_turn_steps += int(rollout_info["turn_steps"])
+        total_no_vision_no_turn_steps += int(rollout_info["no_vision_no_turn_steps"])
+        for status in rollout_info["episode_statuses"]:
+            status_counts[status] = status_counts.get(status, 0) + 1
+            if status in stage_counts[stage_index]:
+                stage_counts[stage_index][status] += 1
+
         advantages = buffer.advantages
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        advantages = (advantages - advantages.mean()) / (
+            advantages.std(unbiased=False) + 1e-8
+        )
 
         batch_indices = np.arange(rollout_size)
         for _ in range(config.update_epochs):
             rng.shuffle(batch_indices)
             for start in range(0, rollout_size, config.minibatch_size):
                 indices = batch_indices[start : start + config.minibatch_size]
-                mb_obs = buffer.observations[indices]
-                mb_actions = buffer.actions[indices]
-                mb_old_log_probs = buffer.log_probs[indices]
-                mb_advantages = advantages[indices]
-                mb_returns = buffer.returns[indices]
-
-                distribution = model.distribution(mb_obs)
-                new_log_probs = distribution.log_prob(mb_actions)
-                entropy = distribution.entropy().mean()
-                ratio = (new_log_probs - mb_old_log_probs).exp()
-
-                unclipped_policy_loss = -mb_advantages * ratio
-                clipped_policy_loss = -mb_advantages * torch.clamp(
-                    ratio,
-                    1.0 - config.clip_coef,
-                    1.0 + config.clip_coef,
-                )
-                policy_loss = torch.max(unclipped_policy_loss, clipped_policy_loss).mean()
-                value_loss = 0.5 * (model.value(mb_obs) - mb_returns).pow(2).mean()
-                loss = (
-                    policy_loss
-                    + config.value_coef * value_loss
-                    - config.entropy_coef * entropy
+                loss_terms = compute_ppo_loss(
+                    model,
+                    buffer.observations[indices],
+                    buffer.actions[indices],
+                    buffer.log_probs[indices],
+                    advantages[indices],
+                    buffer.returns[indices],
+                    clip_coef=config.clip_coef,
+                    value_coef=config.value_coef,
+                    entropy_coef=config.entropy_coef,
                 )
 
                 optimizer.zero_grad()
-                loss.backward()
+                loss_terms["loss"].backward()
                 nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 optimizer.step()
 
+                for key in loss_history:
+                    loss_history[key].append(float(loss_terms[key].detach().item()))
+
+    episode_count = len(completed_returns)
     metrics = {
         "timesteps": global_step,
-        "episodes": len(completed_returns),
+        "episodes": episode_count,
         "successes": status_counts["success"],
         "collisions": status_counts["collision"],
         "timeouts": status_counts["timeout"],
-        "success_rate": status_counts["success"] / max(len(completed_returns), 1),
-        "collision_rate": status_counts["collision"] / max(len(completed_returns), 1),
-        "timeout_rate": status_counts["timeout"] / max(len(completed_returns), 1),
+        "success_rate": status_counts["success"] / max(episode_count, 1),
+        "collision_rate": status_counts["collision"] / max(episode_count, 1),
+        "timeout_rate": status_counts["timeout"] / max(episode_count, 1),
         "mean_return": float(np.mean(completed_returns)) if completed_returns else 0.0,
         "mean_training_return": (
-            float(np.mean(completed_training_returns))
-            if completed_training_returns
-            else 0.0
+            float(np.mean(completed_training_returns)) if completed_training_returns else 0.0
         ),
         "mean_episode_length": (
             float(np.mean(completed_lengths)) if completed_lengths else 0.0
         ),
+        "mean_initial_distance": (
+            float(np.mean(initial_distances)) if initial_distances else 0.0
+        ),
+        "mean_final_distance": (
+            float(np.mean(final_distances)) if final_distances else 0.0
+        ),
+        "mean_distance_delta": (
+            float(np.mean(np.asarray(initial_distances) - np.asarray(final_distances)))
+            if initial_distances and final_distances
+            else 0.0
+        ),
+        "action_conflict_rate": total_action_conflict_steps / max(global_step, 1),
+        "mean_action_conflicts": total_action_conflicts / max(global_step, 1),
+        "target_visible_rate": total_target_visible_steps / max(global_step, 1),
+        "target_found_rate": total_target_found_steps / max(global_step, 1),
+        "turn_action_rate": total_turn_steps / max(global_step, 1),
+        "no_vision_no_turn_rate": total_no_vision_no_turn_steps / max(global_step, 1),
+        "policy_loss": _mean_or_zero(loss_history["policy_loss"]),
+        "value_loss": _mean_or_zero(loss_history["value_loss"]),
+        "entropy": _mean_or_zero(loss_history["entropy"]),
+        "approx_kl": _mean_or_zero(loss_history["approx_kl"]),
+        "clip_fraction": _mean_or_zero(loss_history["clip_fraction"]),
         "curriculum": {
             "enabled": config.curriculum,
             "stages": max(config.curriculum_stages if config.curriculum else 1, 1),
@@ -326,7 +651,14 @@ def train_ppo(config: PPOConfig, checkpoint_path: Path | None = None) -> dict[st
     }
 
     if checkpoint_path is not None:
-        save_checkpoint(checkpoint_path, model, config, observation_dim, action_dim, metrics)
+        save_checkpoint(
+            checkpoint_path,
+            model,
+            config,
+            observation_size,
+            action_size,
+            metrics,
+        )
 
     return metrics
 
@@ -335,8 +667,8 @@ def save_checkpoint(
     path: Path,
     model: ActorCritic,
     config: PPOConfig,
-    observation_dim: int,
-    action_dim: int,
+    observation_size: int,
+    action_size: int,
     metrics: dict[str, Any],
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -344,8 +676,8 @@ def save_checkpoint(
         {
             "model_state_dict": model.state_dict(),
             "config": asdict(config),
-            "observation_dim": observation_dim,
-            "action_dim": action_dim,
+            "observation_size": observation_size,
+            "action_size": action_size,
             "training_metrics": metrics,
         },
         path,
@@ -356,8 +688,8 @@ def load_checkpoint(path: Path) -> tuple[ActorCritic, PPOConfig, dict[str, Any]]
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     config = PPOConfig(**checkpoint["config"])
     model = ActorCritic(
-        int(checkpoint["observation_dim"]),
-        int(checkpoint["action_dim"]),
+        int(checkpoint["observation_size"]),
+        int(checkpoint["action_size"]),
         config.hidden_size,
     )
     model.load_state_dict(checkpoint["model_state_dict"])
@@ -422,3 +754,7 @@ def evaluate_checkpoint(
         "timeouts": status_counts["timeout"],
         "training_metrics": training_metrics,
     }
+
+
+def _mean_or_zero(values: list[float]) -> float:
+    return float(np.mean(values)) if values else 0.0

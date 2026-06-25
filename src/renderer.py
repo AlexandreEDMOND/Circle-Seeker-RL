@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import math
+
+import numpy as np
 import pygame
 
 try:
@@ -33,6 +36,8 @@ class CircleSeekRenderer:
             width=2,
         )
 
+        self._draw_vision()
+
         pygame.draw.circle(
             self.screen,
             (65, 205, 95),
@@ -41,11 +46,10 @@ class CircleSeekRenderer:
         )
 
         for obstacle in self.env.obstacles:
-            pygame.draw.circle(
+            pygame.draw.polygon(
                 self.screen,
                 (220, 70, 70),
-                obstacle.position.astype(int),
-                int(obstacle.radius),
+                obstacle.vertices().astype(int),
             )
 
         pygame.draw.circle(
@@ -54,6 +58,20 @@ class CircleSeekRenderer:
             self.env.agent_position.astype(int),
             int(self.env.agent_radius),
         )
+        heading = self.env.agent_position + self.env.agent_radius * 1.8 * np.array(
+            [
+                math.cos(self.env.agent_orientation),
+                math.sin(self.env.agent_orientation),
+            ],
+            dtype=np.float32,
+        )
+        pygame.draw.line(
+            self.screen,
+            (235, 245, 255),
+            self.env.agent_position.astype(int),
+            tuple(heading.astype(int)),
+            width=3,
+        )
 
         self._draw_hud(reward, total_reward)
         pygame.display.flip()
@@ -61,6 +79,26 @@ class CircleSeekRenderer:
 
     def close(self) -> None:
         pygame.quit()
+
+    def _draw_vision(self) -> None:
+        polygon = self.env.vision_polygon()
+        if len(polygon) < 3:
+            return
+
+        overlay = pygame.Surface((self.env.width, self.env.height), pygame.SRCALPHA)
+        pygame.draw.polygon(
+            overlay,
+            (90, 165, 255, 45),
+            polygon.astype(int),
+        )
+        pygame.draw.lines(
+            overlay,
+            (130, 190, 255, 120),
+            False,
+            polygon.astype(int),
+            width=1,
+        )
+        self.screen.blit(overlay, (0, 0))
 
     def _draw_hud(self, reward: float, total_reward: float) -> None:
         lines = [

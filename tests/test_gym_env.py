@@ -1,25 +1,26 @@
 import numpy as np
 from gymnasium import spaces
 
+from src.env import CircleSeekEnv
 from src.gym_env import CircleSeekGymEnv
 
 
 def test_gym_env_defines_spaces_from_core_environment() -> None:
     env = CircleSeekGymEnv(obstacle_count=4)
 
-    assert isinstance(env.action_space, spaces.Discrete)
-    assert env.action_space.n == 5
+    assert isinstance(env.action_space, spaces.MultiBinary)
+    assert env.action_space.n == CircleSeekEnv.ACTION_SIZE
     assert isinstance(env.observation_space, spaces.Box)
-    assert env.observation_space.shape == (21,)
+    assert env.observation_space.shape == (36,)
     assert env.observation_space.dtype == np.float32
 
 
 def test_gym_reset_returns_observation_and_info() -> None:
-    env = CircleSeekGymEnv(obstacle_count=0)
+    env = CircleSeekGymEnv(obstacle_count=0, ray_count=7)
 
     observation, info = env.reset(seed=123)
 
-    assert observation.shape == (5,)
+    assert observation.shape == (12,)
     assert observation.dtype == np.float32
     assert env.observation_space.contains(observation)
     assert info["step"] == 0
@@ -30,7 +31,7 @@ def test_gym_step_returns_standard_tuple() -> None:
     env = CircleSeekGymEnv(obstacle_count=0, approach_bonus=False)
     env.reset(seed=123)
 
-    observation, reward, terminated, truncated, info = env.step(0)
+    observation, reward, terminated, truncated, info = env.step(CircleSeekEnv.ACTION_NOOP)
 
     assert env.observation_space.contains(observation)
     assert reward == -0.01

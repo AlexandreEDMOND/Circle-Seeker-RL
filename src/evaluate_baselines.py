@@ -11,18 +11,27 @@ from src.env import CircleSeekEnv
 from src.gym_env import CircleSeekGymEnv
 
 
-PolicyFn = Callable[[CircleSeekGymEnv, np.random.Generator], int]
+PolicyFn = Callable[[CircleSeekGymEnv, np.random.Generator], np.ndarray]
 
 
-def random_policy(env: CircleSeekGymEnv, rng: np.random.Generator) -> int:
-    return int(rng.integers(0, env.action_space.n))
+def random_policy(env: CircleSeekGymEnv, rng: np.random.Generator) -> np.ndarray:
+    return rng.integers(0, 2, size=CircleSeekEnv.ACTION_SIZE, dtype=np.int8)
 
 
-def target_seeking_policy(env: CircleSeekGymEnv, rng: np.random.Generator) -> int:
+def target_seeking_policy(env: CircleSeekGymEnv, rng: np.random.Generator) -> np.ndarray:
+    action = np.zeros(CircleSeekEnv.ACTION_SIZE, dtype=np.int8)
     delta = env.env.target_position - env.env.agent_position
-    if abs(delta[0]) >= abs(delta[1]):
-        return CircleSeekEnv.ACTION_RIGHT if delta[0] > 0 else CircleSeekEnv.ACTION_LEFT
-    return CircleSeekEnv.ACTION_DOWN if delta[1] > 0 else CircleSeekEnv.ACTION_UP
+    if abs(delta[0]) > 1.0:
+        action[CircleSeekEnv.ACTION_RIGHT if delta[0] > 0 else CircleSeekEnv.ACTION_LEFT] = 1
+    if abs(delta[1]) > 1.0:
+        action[CircleSeekEnv.ACTION_DOWN if delta[1] > 0 else CircleSeekEnv.ACTION_UP] = 1
+
+    angle_to_target = env.env._angle_to(env.env.target_position)
+    if angle_to_target > 0.05:
+        action[CircleSeekEnv.ACTION_TURN_RIGHT] = 1
+    elif angle_to_target < -0.05:
+        action[CircleSeekEnv.ACTION_TURN_LEFT] = 1
+    return action
 
 
 POLICIES: dict[str, PolicyFn] = {

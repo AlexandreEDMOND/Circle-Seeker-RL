@@ -14,7 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
 import pygame
 
-from src.evaluate_baselines import target_seeking_policy
+from src.evaluate_baselines import random_policy, target_seeking_policy
 from src.gym_env import CircleSeekGymEnv
 from src.ppo import build_env, load_checkpoint, select_action
 
@@ -50,13 +50,38 @@ def draw_env(
     core = env.env
     surface.fill(BG)
     pygame.draw.rect(surface, BORDER, pygame.Rect(0, 0, core.width, core.height), width=2)
+    draw_vision(surface, env, offset_x=0)
     pygame.draw.circle(surface, TARGET, core.target_position.astype(int), int(core.target_radius))
 
     for obstacle in core.obstacles:
-        pygame.draw.circle(surface, OBSTACLE, obstacle.position.astype(int), int(obstacle.radius))
+        pygame.draw.polygon(surface, OBSTACLE, obstacle.vertices().astype(int))
 
     pygame.draw.circle(surface, AGENT, core.agent_position.astype(int), int(core.agent_radius))
+    draw_heading(surface, env, offset_x=0)
     draw_hud(surface, env, reward=reward, total_reward=total_reward, label=label)
+
+
+def draw_vision(surface: pygame.Surface, env: CircleSeekGymEnv, *, offset_x: int) -> None:
+    polygon = env.env.vision_polygon()
+    if len(polygon) < 3:
+        return
+    shifted = polygon.copy()
+    shifted[:, 0] += offset_x
+    overlay = pygame.Surface(surface.get_size(), pygame.SRCALPHA)
+    pygame.draw.polygon(overlay, (90, 165, 255, 45), shifted.astype(int))
+    pygame.draw.lines(overlay, (130, 190, 255, 120), False, shifted.astype(int), width=1)
+    surface.blit(overlay, (0, 0))
+
+
+def draw_heading(surface: pygame.Surface, env: CircleSeekGymEnv, *, offset_x: int) -> None:
+    core = env.env
+    start = core.agent_position.copy()
+    start[0] += offset_x
+    heading = start + core.agent_radius * 1.8 * np.array(
+        [np.cos(core.agent_orientation), np.sin(core.agent_orientation)],
+        dtype=np.float32,
+    )
+    pygame.draw.line(surface, TEXT, start.astype(int), heading.astype(int), width=3)
 
 
 def draw_hud(
@@ -248,7 +273,7 @@ def rollout_positions(
         if env.env.status != "running":
             break
         if policy == "random":
-            action = int(rng.integers(0, env.action_space.n))
+            action = random_policy(env, rng)
         elif policy == "ppo":
             if model is None:
                 raise RuntimeError("PPO model was not loaded")
@@ -327,8 +352,9 @@ def draw_trajectory_panel(
     pygame.draw.circle(surface, TARGET, target, int(env.env.target_radius))
 
     for obstacle in env.env.obstacles:
-        position = (int(obstacle.position[0]) + offset_x, int(obstacle.position[1]))
-        pygame.draw.circle(surface, OBSTACLE, position, int(obstacle.radius))
+        vertices = obstacle.vertices().copy()
+        vertices[:, 0] += offset_x
+        pygame.draw.polygon(surface, OBSTACLE, vertices.astype(int))
 
     shifted_path = [(x + offset_x, y) for x, y in path]
     if len(shifted_path) > 1:

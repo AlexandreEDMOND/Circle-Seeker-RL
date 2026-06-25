@@ -20,11 +20,41 @@ def parse_args() -> argparse.Namespace:
         default=PPOConfig.distance_reward_coef,
         help="Extra training-only reward for reducing target distance.",
     )
+    parser.add_argument(
+        "--action-conflict-penalty",
+        type=float,
+        default=PPOConfig.action_conflict_penalty,
+        help="Training-only penalty for each contradictory action pair.",
+    )
+    parser.add_argument(
+        "--target-visible-reward-coef",
+        type=float,
+        default=PPOConfig.target_visible_reward_coef,
+        help="Training-only reward when the target is visible in the vision cone.",
+    )
+    parser.add_argument(
+        "--target-found-reward-coef",
+        type=float,
+        default=PPOConfig.target_found_reward_coef,
+        help="Training-only reward when the target becomes visible after being hidden.",
+    )
+    parser.add_argument(
+        "--no-vision-no-turn-penalty",
+        type=float,
+        default=PPOConfig.no_vision_no_turn_penalty,
+        help="Training-only penalty when the target is hidden and the agent does not turn.",
+    )
     parser.add_argument("--hidden-size", type=int, default=PPOConfig.hidden_size)
     parser.add_argument("--seed", type=int, default=PPOConfig.seed)
     parser.add_argument("--obstacle-count", type=int, default=PPOConfig.obstacle_count)
     parser.add_argument("--obstacle-speed", type=float, default=PPOConfig.obstacle_speed)
     parser.add_argument("--obstacle-radius", type=float, default=PPOConfig.obstacle_radius)
+    parser.add_argument(
+        "--min-target-distance",
+        type=float,
+        default=PPOConfig.min_target_distance,
+        help="Minimum spawn distance between the agent and target.",
+    )
     parser.add_argument("--max-steps", type=int, default=PPOConfig.max_steps)
     parser.add_argument(
         "--curriculum",
@@ -63,11 +93,16 @@ def main() -> None:
         minibatch_size=args.minibatch_size,
         learning_rate=args.learning_rate,
         distance_reward_coef=args.distance_reward_coef,
+        action_conflict_penalty=args.action_conflict_penalty,
+        target_visible_reward_coef=args.target_visible_reward_coef,
+        target_found_reward_coef=args.target_found_reward_coef,
+        no_vision_no_turn_penalty=args.no_vision_no_turn_penalty,
         hidden_size=args.hidden_size,
         seed=args.seed,
         obstacle_count=args.obstacle_count,
         obstacle_speed=args.obstacle_speed,
         obstacle_radius=args.obstacle_radius,
+        min_target_distance=args.min_target_distance,
         max_steps=args.max_steps,
         curriculum=args.curriculum,
         curriculum_stages=args.curriculum_stages,
