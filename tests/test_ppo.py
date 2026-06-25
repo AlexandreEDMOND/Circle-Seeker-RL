@@ -368,6 +368,11 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     assert "target_found_rate" in train_metrics
     assert "turn_action_rate" in train_metrics
     assert "no_vision_no_turn_rate" in train_metrics
+    assert len(train_metrics["updates"]) == 2
+    assert train_metrics["updates"][0]["global_step"] == 8
+    assert "mean_return" in train_metrics["updates"][0]
+    assert "success_rate" in train_metrics["updates"][0]
+    assert "approx_kl" in train_metrics["updates"][0]
     assert eval_metrics["episodes"] == 2
     assert (
         eval_metrics["successes"]

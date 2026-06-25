@@ -14,6 +14,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--update-epochs", type=int, default=PPOConfig.update_epochs)
     parser.add_argument("--minibatch-size", type=int, default=PPOConfig.minibatch_size)
     parser.add_argument("--learning-rate", type=float, default=PPOConfig.learning_rate)
+    parser.add_argument("--gamma", type=float, default=PPOConfig.gamma)
+    parser.add_argument("--gae-lambda", type=float, default=PPOConfig.gae_lambda)
+    parser.add_argument("--clip-coef", type=float, default=PPOConfig.clip_coef)
+    parser.add_argument("--entropy-coef", type=float, default=PPOConfig.entropy_coef)
+    parser.add_argument("--value-coef", type=float, default=PPOConfig.value_coef)
+    parser.add_argument("--max-grad-norm", type=float, default=PPOConfig.max_grad_norm)
     parser.add_argument(
         "--distance-reward-coef",
         type=float,
@@ -92,6 +98,12 @@ def main() -> None:
         update_epochs=args.update_epochs,
         minibatch_size=args.minibatch_size,
         learning_rate=args.learning_rate,
+        gamma=args.gamma,
+        gae_lambda=args.gae_lambda,
+        clip_coef=args.clip_coef,
+        entropy_coef=args.entropy_coef,
+        value_coef=args.value_coef,
+        max_grad_norm=args.max_grad_norm,
         distance_reward_coef=args.distance_reward_coef,
         action_conflict_penalty=args.action_conflict_penalty,
         target_visible_reward_coef=args.target_visible_reward_coef,

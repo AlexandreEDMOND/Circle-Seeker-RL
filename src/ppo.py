@@ -531,6 +531,7 @@ def train_ppo(
         "approx_kl": [],
         "clip_fraction": [],
     }
+    update_history: list[dict[str, Any]] = []
     stage_counts: list[dict[str, int]] = [
         {"stage": idx, "success": 0, "collision": 0, "timeout": 0}
         for idx in range(max(config.curriculum_stages if config.curriculum else 1, 1))
@@ -578,6 +579,13 @@ def train_ppo(
         )
 
         batch_indices = np.arange(rollout_size)
+        update_loss_history: dict[str, list[float]] = {
+            "policy_loss": [],
+            "value_loss": [],
+            "entropy": [],
+            "approx_kl": [],
+            "clip_fraction": [],
+        }
         for _ in range(config.update_epochs):
             rng.shuffle(batch_indices)
             for start in range(0, rollout_size, config.minibatch_size):
@@ -600,7 +608,54 @@ def train_ppo(
                 optimizer.step()
 
                 for key in loss_history:
-                    loss_history[key].append(float(loss_terms[key].detach().item()))
+                    value = float(loss_terms[key].detach().item())
+                    loss_history[key].append(value)
+                    update_loss_history[key].append(value)
+
+        episode_count = len(completed_returns)
+        rollout_episode_count = len(rollout_info["episode_returns"])
+        rollout_successes = sum(
+            1 for status in rollout_info["episode_statuses"] if status == "success"
+        )
+        update_history.append(
+            {
+                "update": len(update_history) + 1,
+                "global_step": global_step,
+                "stage": stage_index,
+                "rollout_steps": rollout_size,
+                "rollout_episodes": rollout_episode_count,
+                "rollout_mean_return": (
+                    float(np.mean(rollout_info["episode_returns"]))
+                    if rollout_info["episode_returns"]
+                    else 0.0
+                ),
+                "rollout_success_rate": (
+                    rollout_successes / rollout_episode_count
+                    if rollout_episode_count
+                    else 0.0
+                ),
+                "episodes": episode_count,
+                "success_rate": status_counts["success"] / max(episode_count, 1),
+                "collision_rate": status_counts["collision"] / max(episode_count, 1),
+                "timeout_rate": status_counts["timeout"] / max(episode_count, 1),
+                "mean_return": (
+                    float(np.mean(completed_returns)) if completed_returns else 0.0
+                ),
+                "mean_training_return": (
+                    float(np.mean(completed_training_returns))
+                    if completed_training_returns
+                    else 0.0
+                ),
+                "mean_episode_length": (
+                    float(np.mean(completed_lengths)) if completed_lengths else 0.0
+                ),
+                "policy_loss": _mean_or_zero(update_loss_history["policy_loss"]),
+                "value_loss": _mean_or_zero(update_loss_history["value_loss"]),
+                "entropy": _mean_or_zero(update_loss_history["entropy"]),
+                "approx_kl": _mean_or_zero(update_loss_history["approx_kl"]),
+                "clip_fraction": _mean_or_zero(update_loss_history["clip_fraction"]),
+            }
+        )
 
     episode_count = len(completed_returns)
     metrics = {
@@ -648,6 +703,7 @@ def train_ppo(
             "final_obstacle_speed": config.obstacle_speed,
             "final_obstacle_radius": config.obstacle_radius,
         },
+        "updates": update_history,
     }
 
     if checkpoint_path is not None:

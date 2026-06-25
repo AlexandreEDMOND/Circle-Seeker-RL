@@ -21,9 +21,9 @@
 - [x] Add Gymnasium as a dependency.
 - [x] Wrap `CircleSeekEnv` as `gymnasium.Env`.
 - [x] Define `observation_space` and `action_space`.
-- [ ] Keep the existing pygame renderer usable after the Gymnasium wrapper.
+- [x] Keep the existing pygame renderer usable after the Gymnasium wrapper.
 - [x] Add tests for Gymnasium-compatible reset and step signatures.
-- [ ] Add deterministic evaluation seeds.
+- [x] Add deterministic evaluation seeds.
 
 ## Baselines
 
@@ -53,12 +53,13 @@
 - [x] Add `train_ppo.py`.
 - [x] Add `evaluate_ppo.py`.
 - [x] Save metrics to disk.
-- [ ] Add plots for returns, success rate, entropy, value loss, policy loss, and approximate KL.
-- [ ] Render or record a trained policy run.
+- [x] Add plots for returns, success rate, entropy, value loss, policy loss, and approximate KL.
+- [x] Render or record a trained policy run.
+- [ ] Add optional KL early stopping when approximate KL exceeds a configured target.
 
 ## Documentation
 
-- [ ] Update README with PPO training commands.
-- [ ] Document how the code maps to the PPO paper.
-- [ ] Add first reproducible training result.
-- [ ] Add a preview GIF or video after training is stable.
+- [x] Update README with PPO training commands.
+- [x] Document how the code maps to the PPO paper.
+- [x] Add first reproducible training result.
+- [x] Add a preview GIF or video after training is stable.

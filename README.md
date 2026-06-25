@@ -112,6 +112,12 @@ Evaluate a PPO checkpoint:
 uv run python -m src.evaluate_ppo checkpoints/ppo.pt --episodes 50 --seed 123
 ```
 
+Plot PPO training curves from a checkpoint:
+
+```bash
+uv run python scripts/plot_training_metrics.py checkpoints/ppo.pt --output results/training_curves.svg
+```
+
 Visual PPO playback:
 
 ```bash
@@ -125,6 +131,16 @@ uv run python -m src.train_ppo --total-timesteps 50000 --rollout-steps 1024 --up
 uv run python -m src.evaluate_ppo checkpoints/ppo_simple.pt --episodes 20 --seed 456
 uv run python -m src.watch_ppo checkpoints/ppo_simple.pt --seed 123
 ```
+
+On the local `ppo_simple.pt` run produced by the command above, deterministic
+evaluation with `--episodes 20 --seed 456` produced:
+
+- success rate: `0.15`
+- collision rate: `0.0`
+- timeout rate: `0.85`
+- mean return: `-1.245`
+- mean initial distance: `289.224`
+- mean final distance: `232.628`
 
 ## Test
 
@@ -210,7 +226,8 @@ Observation vector:
 │       ├── ppo_scan_trained.gif
 │       └── trajectory_scan_comparison.png
 ├── scripts/
-│   └── generate_readme_media.py
+│   ├── generate_readme_media.py
+│   └── plot_training_metrics.py
 ├── src/
 │   ├── __init__.py
 │   ├── env.py
@@ -223,7 +240,12 @@ Observation vector:
 │   ├── manual_play.py
 │   └── random_play.py
 ├── tests/
-│   └── test_env.py
+│   ├── test_env.py
+│   ├── test_evaluate_baselines.py
+│   ├── test_gym_env.py
+│   ├── test_plot_training_metrics.py
+│   ├── test_ppo.py
+│   └── test_renderer.py
 ├── paper/
 │   └── Proximal Policy Optimization Algorithms.pdf
 ├── ROADMAP.md
@@ -249,9 +271,11 @@ Implemented:
 - random and target-seeking heuristic baseline evaluation
 - from-scratch PPO actor-critic implementation with rollout buffer, GAE returns,
   environment rollout collection, clipped policy objective, value loss, entropy
-  bonus, mini-batch updates, checkpoint saving, and checkpoint evaluation
+  bonus, mini-batch updates, checkpoint saving, checkpoint evaluation, and
+  per-update training metrics
 - pygame visualization
 - manual and random-play scripts
+- SVG training curve generation from checkpoint metrics
 - PyTorch actor-critic model
 - PPO rollout buffer with GAE returns and advantages
 - unit tests and GitHub Actions CI
@@ -262,6 +286,23 @@ Not included yet:
 - vectorized environments
 - advanced experiment tracking
 - tuned hyperparameters for the obstacle-heavy task
+- KL-based early stopping during PPO updates
+
+## PPO Paper Mapping
+
+The first implementation target is the PPO clipped objective from the paper.
+The code maps to the paper components as follows:
+
+- policy and value function: `ActorCritic` in `src/ppo.py`
+- old action log probabilities: `RolloutBuffer.log_probs`
+- probability ratio: `ratio = exp(new_log_prob - old_log_prob)` in `compute_ppo_loss`
+- clipped surrogate objective: `torch.min(ratio * advantages, clipped_ratio * advantages)`
+- value-function loss: squared error between computed returns and value estimates
+- entropy bonus: Bernoulli policy entropy summed over the multi-binary action bits
+- advantage estimates: truncated GAE in `RolloutBuffer.compute_returns_and_advantages`
+- multiple epochs with shuffled mini-batches: the update loop in `train_ppo`
+- diagnostics: per-update policy loss, value loss, entropy, approximate KL, clip fraction,
+  return, success rate, collision rate, and timeout rate saved in checkpoints
 
 ## Paper Reference
 
