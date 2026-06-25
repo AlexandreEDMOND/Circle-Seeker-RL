@@ -6,7 +6,7 @@ Circle Seeker RL is a small Python reinforcement learning project focused on
 implementing Proximal Policy Optimization (PPO) from the paper on a custom 2D
 environment.
 
-An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. This first version focuses on clean environment mechanics, visual debugging, and a Gymnasium-like API. It does not train a model yet.
+An agent moves in a top-down 2D world and must reach a green circular target while avoiding moving red circular obstacles. The project includes clean environment mechanics, visual debugging, baseline policies, and a compact from-scratch PPO training pipeline.
 
 ## Project Goals
 
@@ -27,12 +27,27 @@ The pygame window displays:
 - red circles: moving obstacles
 - HUD: current step, reward, cumulative reward, distance to target, episode status
 
+![Circle Seeker RL environment](docs/media/environment.png)
+
+Target-seeking baseline movement:
+
+![Target-seeking agent movement](docs/media/agent_movement.gif)
+
+Trained PPO policy playback:
+
+![Trained PPO agent movement](docs/media/ppo_trained.gif)
+
+Random policy vs trained PPO trajectory on the same seeded environment:
+
+![Random policy vs trained PPO trajectory](docs/media/trajectory_comparison.png)
+
 ## Installation
 
 Prerequisites:
 
 - Python 3.11+
 - uv
+- ffmpeg, only if you want to regenerate the README GIFs
 
 Create the local virtual environment and install dependencies:
 
@@ -81,6 +96,48 @@ Save baseline metrics to disk:
 
 ```bash
 uv run python -m src.evaluate_baselines --episodes 100 --seed 123 --output results/baselines.json
+```
+
+Train a PPO checkpoint:
+
+```bash
+uv run python -m src.train_ppo --total-timesteps 100000 --checkpoint checkpoints/ppo.pt
+```
+
+Evaluate a PPO checkpoint:
+
+```bash
+uv run python -m src.evaluate_ppo checkpoints/ppo.pt --episodes 50 --seed 123
+```
+
+Visual PPO playback:
+
+```bash
+uv run python -m src.watch_ppo checkpoints/ppo.pt --seed 123
+```
+
+For quick debugging, start with an easier no-obstacle run:
+
+```bash
+uv run python -m src.train_ppo --total-timesteps 50000 --obstacle-count 0 --max-steps 300 --checkpoint checkpoints/ppo_simple.pt
+uv run python -m src.evaluate_ppo checkpoints/ppo_simple.pt --episodes 50
+```
+
+Train with curriculum learning:
+
+```bash
+uv run python -m src.train_ppo --curriculum --curriculum-stages 4 --total-timesteps 100000 --obstacle-count 4 --checkpoint checkpoints/ppo_curriculum.pt
+uv run python -m src.evaluate_ppo checkpoints/ppo_curriculum.pt --episodes 50
+```
+
+The curriculum keeps the number of obstacle observation slots fixed and gradually
+increases obstacle radius and speed. This avoids changing the neural network
+input size during training.
+
+Regenerate README media from a trained checkpoint:
+
+```bash
+uv run python scripts/generate_readme_media.py --checkpoint checkpoints/ppo_curriculum.pt --output-dir docs/media --seed 134 --gif-frames 200
 ```
 
 ## Test
@@ -156,11 +213,23 @@ Observation vector:
 ```text
 .
 ├── .github/workflows/ci.yml
+├── docs/
+│   └── media/
+│       ├── agent_movement.gif
+│       ├── environment.png
+│       ├── ppo_trained.gif
+│       └── trajectory_comparison.png
+├── scripts/
+│   └── generate_readme_media.py
 ├── src/
 │   ├── __init__.py
 │   ├── env.py
+│   ├── evaluate_ppo.py
 │   ├── gym_env.py
 │   ├── renderer.py
+│   ├── ppo.py
+│   ├── train_ppo.py
+│   ├── watch_ppo.py
 │   ├── manual_play.py
 │   └── random_play.py
 ├── tests/
@@ -186,6 +255,9 @@ Implemented:
 - numeric observations for future RL training
 - Gymnasium adapter with explicit observation and action spaces
 - random and target-seeking heuristic baseline evaluation
+- from-scratch PPO actor-critic implementation with rollout buffer, GAE,
+  clipped policy objective, value loss, entropy bonus, and checkpoint saving
+- PPO training, curriculum training, evaluation, and visual playback scripts
 - pygame visualization
 - manual and random-play scripts
 - unit tests and GitHub Actions CI
@@ -194,11 +266,9 @@ Implemented:
 Not included yet:
 
 - Gymnasium inheritance
-- PPO rollout buffer
-- policy/value neural networks
-- clipped surrogate objective and GAE
-- training and evaluation scripts
-- saved experiment tracking
+- vectorized environments
+- advanced experiment tracking
+- tuned hyperparameters for the obstacle-heavy task
 
 ## Paper Reference
 
