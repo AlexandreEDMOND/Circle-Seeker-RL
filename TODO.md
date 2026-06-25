@@ -55,7 +55,7 @@
 - [x] Save metrics to disk.
 - [x] Add plots for returns, success rate, entropy, value loss, policy loss, and approximate KL.
 - [x] Render or record a trained policy run.
-- [ ] Add optional KL early stopping when approximate KL exceeds a configured target.
+- [x] Add optional KL early stopping when approximate KL exceeds a configured target.
 
 ## Documentation
 

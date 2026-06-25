@@ -106,6 +106,12 @@ Train a PPO checkpoint:
 uv run python -m src.train_ppo --total-timesteps 100000 --checkpoint checkpoints/ppo.pt
 ```
 
+Optionally stop unstable PPO updates early when approximate KL gets too high:
+
+```bash
+uv run python -m src.train_ppo --total-timesteps 100000 --target-kl 0.03 --checkpoint checkpoints/ppo.pt
+```
+
 Evaluate a PPO checkpoint:
 
 ```bash
@@ -286,7 +292,6 @@ Not included yet:
 - vectorized environments
 - advanced experiment tracking
 - tuned hyperparameters for the obstacle-heavy task
-- KL-based early stopping during PPO updates
 
 ## PPO Paper Mapping
 
@@ -301,6 +306,8 @@ The code maps to the paper components as follows:
 - entropy bonus: Bernoulli policy entropy summed over the multi-binary action bits
 - advantage estimates: truncated GAE in `RolloutBuffer.compute_returns_and_advantages`
 - multiple epochs with shuffled mini-batches: the update loop in `train_ppo`
+- optional KL early stopping: `--target-kl` stops the current PPO update when
+  approximate KL exceeds the configured threshold
 - diagnostics: per-update policy loss, value loss, entropy, approximate KL, clip fraction,
   return, success rate, collision rate, and timeout rate saved in checkpoints
 

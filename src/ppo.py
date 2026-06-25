@@ -30,6 +30,7 @@ class PPOConfig:
     no_vision_no_turn_penalty: float = 0.005
     learning_rate: float = 3e-4
     max_grad_norm: float = 0.5
+    target_kl: float | None = None
     hidden_size: int = 64
     seed: int = 123
     obstacle_count: int = 4
@@ -439,6 +440,10 @@ def compute_ppo_loss(
     }
 
 
+def should_stop_for_kl(approx_kl: float, target_kl: float | None) -> bool:
+    return target_kl is not None and approx_kl > target_kl
+
+
 def set_seed(seed: int) -> np.random.Generator:
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -586,8 +591,12 @@ def train_ppo(
             "approx_kl": [],
             "clip_fraction": [],
         }
+        kl_early_stopped = False
+        completed_update_epochs = 0
+        optimized_minibatches = 0
         for _ in range(config.update_epochs):
             rng.shuffle(batch_indices)
+            completed_update_epochs += 1
             for start in range(0, rollout_size, config.minibatch_size):
                 indices = batch_indices[start : start + config.minibatch_size]
                 loss_terms = compute_ppo_loss(
@@ -606,11 +615,20 @@ def train_ppo(
                 loss_terms["loss"].backward()
                 nn.utils.clip_grad_norm_(model.parameters(), config.max_grad_norm)
                 optimizer.step()
+                optimized_minibatches += 1
 
                 for key in loss_history:
                     value = float(loss_terms[key].detach().item())
                     loss_history[key].append(value)
                     update_loss_history[key].append(value)
+
+                approx_kl = float(loss_terms["approx_kl"].detach().item())
+                if should_stop_for_kl(approx_kl, config.target_kl):
+                    kl_early_stopped = True
+                    break
+
+            if kl_early_stopped:
+                break
 
         episode_count = len(completed_returns)
         rollout_episode_count = len(rollout_info["episode_returns"])
@@ -623,6 +641,9 @@ def train_ppo(
                 "global_step": global_step,
                 "stage": stage_index,
                 "rollout_steps": rollout_size,
+                "optimized_minibatches": optimized_minibatches,
+                "completed_update_epochs": completed_update_epochs,
+                "kl_early_stopped": kl_early_stopped,
                 "rollout_episodes": rollout_episode_count,
                 "rollout_mean_return": (
                     float(np.mean(rollout_info["episode_returns"]))
@@ -696,6 +717,10 @@ def train_ppo(
         "entropy": _mean_or_zero(loss_history["entropy"]),
         "approx_kl": _mean_or_zero(loss_history["approx_kl"]),
         "clip_fraction": _mean_or_zero(loss_history["clip_fraction"]),
+        "target_kl": config.target_kl,
+        "kl_early_stops": sum(
+            1 for update in update_history if update["kl_early_stopped"]
+        ),
         "curriculum": {
             "enabled": config.curriculum,
             "stages": max(config.curriculum_stages if config.curriculum else 1, 1),

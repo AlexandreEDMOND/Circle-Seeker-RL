@@ -1,5 +1,6 @@
 import torch
 import pytest
+import src.ppo as ppo_module
 
 from src.ppo import (
     ActorCritic,
@@ -11,6 +12,7 @@ from src.ppo import (
     collect_rollout,
     compute_ppo_loss,
     evaluate_checkpoint,
+    should_stop_for_kl,
     target_visibility_training_reward,
     train_ppo,
 )
@@ -335,6 +337,58 @@ def test_compute_ppo_loss_returns_scalar_diagnostics() -> None:
     assert loss_terms["loss"].requires_grad is True
 
 
+def test_should_stop_for_kl_uses_optional_threshold() -> None:
+    assert should_stop_for_kl(0.02, None) is False
+    assert should_stop_for_kl(0.02, 0.03) is False
+    assert should_stop_for_kl(0.02, 0.02) is False
+    assert should_stop_for_kl(0.02, 0.01) is True
+
+
+def test_train_ppo_stops_update_early_when_target_kl_is_exceeded(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def high_kl_loss(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        model = args[0]
+        loss = next(model.parameters()).sum() * 0.0
+        return {
+            "loss": loss,
+            "policy_loss": torch.tensor(0.0),
+            "value_loss": torch.tensor(0.0),
+            "entropy": torch.tensor(0.0),
+            "approx_kl": torch.tensor(0.02),
+            "clip_fraction": torch.tensor(0.0),
+        }
+
+    monkeypatch.setattr(ppo_module, "compute_ppo_loss", high_kl_loss)
+
+    metrics = train_ppo(
+        PPOConfig(
+            total_timesteps=8,
+            rollout_steps=8,
+            update_epochs=5,
+            minibatch_size=4,
+            hidden_size=16,
+            seed=123,
+            obstacle_count=0,
+            max_steps=5,
+            target_kl=0.01,
+        ),
+        tmp_path / "ppo.pt",
+    )
+
+    assert calls == 1
+    assert metrics["target_kl"] == 0.01
+    assert metrics["kl_early_stops"] == 1
+    assert metrics["updates"][0]["kl_early_stopped"] is True
+    assert metrics["updates"][0]["completed_update_epochs"] == 1
+    assert metrics["updates"][0]["optimized_minibatches"] == 1
+
+
 def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     checkpoint = tmp_path / "ppo.pt"
     config = PPOConfig(
@@ -358,6 +412,8 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     assert "entropy" in train_metrics
     assert "approx_kl" in train_metrics
     assert "clip_fraction" in train_metrics
+    assert "target_kl" in train_metrics
+    assert "kl_early_stops" in train_metrics
     assert "mean_initial_distance" in train_metrics
     assert "mean_final_distance" in train_metrics
     assert "mean_distance_delta" in train_metrics
@@ -373,6 +429,8 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     assert "mean_return" in train_metrics["updates"][0]
     assert "success_rate" in train_metrics["updates"][0]
     assert "approx_kl" in train_metrics["updates"][0]
+    assert "kl_early_stopped" in train_metrics["updates"][0]
+    assert "optimized_minibatches" in train_metrics["updates"][0]
     assert eval_metrics["episodes"] == 2
     assert (
         eval_metrics["successes"]

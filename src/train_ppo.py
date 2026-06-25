@@ -21,6 +21,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--value-coef", type=float, default=PPOConfig.value_coef)
     parser.add_argument("--max-grad-norm", type=float, default=PPOConfig.max_grad_norm)
     parser.add_argument(
+        "--target-kl",
+        type=float,
+        default=PPOConfig.target_kl,
+        help="Stop the current PPO update early when approximate KL exceeds this value.",
+    )
+    parser.add_argument(
         "--distance-reward-coef",
         type=float,
         default=PPOConfig.distance_reward_coef,
@@ -104,6 +110,7 @@ def main() -> None:
         entropy_coef=args.entropy_coef,
         value_coef=args.value_coef,
         max_grad_norm=args.max_grad_norm,
+        target_kl=args.target_kl,
         distance_reward_coef=args.distance_reward_coef,
         action_conflict_penalty=args.action_conflict_penalty,
         target_visible_reward_coef=args.target_visible_reward_coef,
