@@ -124,6 +124,10 @@ Plot PPO training curves from a checkpoint:
 uv run python scripts/plot_training_metrics.py checkpoints/ppo.pt --output results/training_curves.svg
 ```
 
+Example PPO training curves from a short local run:
+
+![PPO training curves](docs/media/training_curves.svg)
+
 Visual PPO playback:
 
 ```bash
@@ -230,6 +234,7 @@ Observation vector:
 │       ├── agent_scan_movement.gif
 │       ├── environment_vision.png
 │       ├── ppo_scan_trained.gif
+│       ├── training_curves.svg
 │       └── trajectory_scan_comparison.png
 ├── scripts/
 │   ├── generate_readme_media.py
