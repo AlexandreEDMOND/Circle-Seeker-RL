@@ -464,7 +464,11 @@ def curriculum_stage(config: PPOConfig, global_step: int) -> tuple[int, float]:
     return stage_index, stage_index / (stage_count - 1)
 
 
-def build_env(config: PPOConfig, stage_progress: float | None = None) -> CircleSeekGymEnv:
+def build_env(
+    config: PPOConfig,
+    stage_progress: float | None = None,
+    **gym_kwargs: Any,
+) -> CircleSeekGymEnv:
     obstacle_speed = config.obstacle_speed
     obstacle_radius = config.obstacle_radius
     if config.curriculum and stage_progress is not None:
@@ -479,6 +483,7 @@ def build_env(config: PPOConfig, stage_progress: float | None = None) -> CircleS
         )
 
     return CircleSeekGymEnv(
+        **gym_kwargs,
         obstacle_count=config.obstacle_count,
         obstacle_speed=obstacle_speed,
         obstacle_radius=obstacle_radius,

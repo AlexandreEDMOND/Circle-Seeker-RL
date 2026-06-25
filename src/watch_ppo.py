@@ -6,7 +6,6 @@ from pathlib import Path
 import pygame
 
 from src.ppo import build_env, load_checkpoint, select_action
-from src.renderer import CircleSeekRenderer
 
 
 def parse_args() -> argparse.Namespace:
@@ -36,10 +35,10 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     model, config, _ = load_checkpoint(args.checkpoint)
-    env = build_env(config)
-    renderer = CircleSeekRenderer(
-        env.env,
-        fps=args.fps,
+    env = build_env(
+        config,
+        render_mode="human",
+        render_fps=args.fps,
         controls_text="policy: ppo | SPACE: pause | R: reset | ESC: quit",
     )
 
@@ -50,6 +49,7 @@ def main() -> None:
     done_frames = 0
     running = True
     observation, _ = env.reset(seed=args.seed + episode_idx)
+    env.render()
 
     while running:
         for event in pygame.event.get():
@@ -82,9 +82,9 @@ def main() -> None:
                 total_reward = 0.0
                 done_frames = 0
 
-        renderer.render(reward, total_reward)
+        env.render()
 
-    renderer.close()
+    env.close()
 
 
 if __name__ == "__main__":

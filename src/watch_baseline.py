@@ -7,7 +7,6 @@ import pygame
 
 from src.evaluate_baselines import POLICIES
 from src.gym_env import CircleSeekGymEnv
-from src.renderer import CircleSeekRenderer
 
 
 def parse_args() -> argparse.Namespace:
@@ -33,16 +32,15 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    env = CircleSeekGymEnv(obstacle_count=args.obstacle_count, max_steps=args.max_steps)
+    env = CircleSeekGymEnv(
+        obstacle_count=args.obstacle_count,
+        max_steps=args.max_steps,
+        render_mode="human",
+        render_fps=args.fps,
+        controls_text=f"policy: {args.policy} | SPACE: pause | R: reset | ESC: quit",
+    )
     policy = POLICIES[args.policy]
     rng = np.random.default_rng(args.seed)
-    renderer = CircleSeekRenderer(
-        env.env,
-        fps=args.fps,
-        controls_text=(
-            f"policy: {args.policy} | SPACE: pause | R: reset | ESC: quit"
-        ),
-    )
 
     episode_idx = 0
     reward = 0.0
@@ -52,6 +50,7 @@ def main() -> None:
     running = True
 
     env.reset(seed=args.seed + episode_idx)
+    env.render()
 
     while running:
         for event in pygame.event.get():
@@ -84,9 +83,9 @@ def main() -> None:
                 total_reward = 0.0
                 done_frames = 0
 
-        renderer.render(reward, total_reward)
+        env.render()
 
-    renderer.close()
+    env.close()
 
 
 if __name__ == "__main__":

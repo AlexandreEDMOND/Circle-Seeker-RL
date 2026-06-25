@@ -185,9 +185,11 @@ env = CircleSeekEnv()
 observation = env.reset(seed=123)
 observation, reward, terminated, truncated, info = env.step(CircleSeekEnv.ACTION_NOOP)
 
-gym_env = CircleSeekGymEnv()
+gym_env = CircleSeekGymEnv(render_mode="human")
 observation, info = gym_env.reset(seed=123)
 observation, reward, terminated, truncated, info = gym_env.step(CircleSeekEnv.ACTION_NOOP)
+gym_env.render()
+gym_env.close()
 ```
 
 Actions:
@@ -223,6 +225,9 @@ Observation vector:
 - target angle relative to the agent's orientation, only when visible
 - normalized distance to target, only when visible
 - agent orientation as `cos(theta), sin(theta)`
+
+The Gymnasium wrapper exposes finite observation bounds for these values and supports
+`render_mode="human"` and `render_mode="rgb_array"`.
 
 ## Repository Structure
 

@@ -17,13 +17,18 @@ class CircleSeekRenderer:
         env: CircleSeekEnv,
         fps: int = 60,
         controls_text: str = "arrows: move | R: reset | ESC: quit",
+        surface: pygame.Surface | None = None,
     ) -> None:
         pygame.init()
         self.env = env
         self.fps = fps
         self.controls_text = controls_text
-        self.screen = pygame.display.set_mode((env.width, env.height))
-        pygame.display.set_caption("Circle Seeker RL")
+        self.display_enabled = surface is None
+        if surface is None:
+            self.screen = pygame.display.set_mode((env.width, env.height))
+            pygame.display.set_caption("Circle Seeker RL")
+        else:
+            self.screen = surface
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont("Arial", 20)
 
@@ -74,8 +79,9 @@ class CircleSeekRenderer:
         )
 
         self._draw_hud(reward, total_reward)
-        pygame.display.flip()
-        self.clock.tick(self.fps)
+        if self.display_enabled:
+            pygame.display.flip()
+            self.clock.tick(self.fps)
 
     def close(self) -> None:
         pygame.quit()
