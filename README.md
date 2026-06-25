@@ -152,6 +152,21 @@ evaluation with `--episodes 20 --seed 456` produced:
 - mean initial distance: `289.224`
 - mean final distance: `232.628`
 
+## Benchmark Snapshot
+
+Short obstacle-heavy benchmark, evaluated over 30 episodes with seed `900`:
+
+| Policy | Success | Collision | Timeout | Mean return |
+| --- | ---: | ---: | ---: | ---: |
+| Random | 0.000 | 0.500 | 0.500 | -7.071 |
+| Target-seeking heuristic | 0.767 | 0.233 | 0.000 | 4.847 |
+| PPO simple checkpoint, no-obstacle eval | 0.200 | 0.000 | 0.800 | -0.582 |
+| PPO obstacles, direct 20k tuning, mean over seeds 101/202/303 | 0.011 | 0.344 | 0.644 | -5.565 |
+
+The current PPO obstacle tuning does not solve the task yet. See
+`docs/benchmarks/ppo_obstacle_benchmark.md` for exact reproduction commands,
+per-seed notes, and the failed curriculum variant.
+
 ## Test
 
 Run the full test suite:
@@ -235,6 +250,8 @@ The Gymnasium wrapper exposes finite observation bounds for these values and sup
 .
 ├── .github/workflows/ci.yml
 ├── docs/
+│   ├── benchmarks/
+│   │   └── ppo_obstacle_benchmark.md
 │   └── media/
 │       ├── agent_scan_movement.gif
 │       ├── environment_vision.png

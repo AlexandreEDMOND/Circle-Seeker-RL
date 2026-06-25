@@ -115,6 +115,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--obstacle-count", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=600)
+    parser.add_argument("--min-target-distance", type=float, default=200.0)
     parser.add_argument("--output", type=Path, default=None)
     return parser.parse_args()
 
@@ -129,6 +130,7 @@ def main() -> None:
         env_kwargs={
             "obstacle_count": args.obstacle_count,
             "max_steps": args.max_steps,
+            "min_target_distance": args.min_target_distance,
         },
     )
 
