@@ -28,19 +28,19 @@ The pygame window displays:
 - translucent blue cone: agent field of vision
 - HUD: current step, reward, cumulative reward, distance to target, episode status
 
-![Circle Seeker RL environment](docs/media/environment.png)
+![Circle Seeker RL environment](docs/media/environment_vision.png)
 
 Target-seeking baseline movement:
 
-![Target-seeking agent movement](docs/media/agent_movement.gif)
+![Target-seeking agent movement](docs/media/agent_scan_movement.gif)
 
 Trained PPO policy playback:
 
-![Trained PPO agent movement](docs/media/ppo_trained.gif)
+![Trained PPO agent movement](docs/media/ppo_scan_trained.gif)
 
 Random policy vs trained PPO trajectory on the same seeded environment:
 
-![Random policy vs trained PPO trajectory](docs/media/trajectory_comparison.png)
+![Random policy vs trained PPO trajectory](docs/media/trajectory_scan_comparison.png)
 
 ## Installation
 
@@ -205,10 +205,10 @@ Observation vector:
 ├── .github/workflows/ci.yml
 ├── docs/
 │   └── media/
-│       ├── agent_movement.gif
-│       ├── environment.png
-│       ├── ppo_trained.gif
-│       └── trajectory_comparison.png
+│       ├── agent_scan_movement.gif
+│       ├── environment_vision.png
+│       ├── ppo_scan_trained.gif
+│       └── trajectory_scan_comparison.png
 ├── scripts/
 │   └── generate_readme_media.py
 ├── src/

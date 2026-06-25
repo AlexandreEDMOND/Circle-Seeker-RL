@@ -113,7 +113,7 @@ def save_environment_png(output_dir: Path, seed: int) -> None:
     env.reset(seed=seed)
     surface = pygame.Surface((env.env.width, env.env.height))
     draw_env(surface, env, label="Circle Seeker RL environment")
-    pygame.image.save(surface, output_dir / "environment.png")
+    pygame.image.save(surface, output_dir / "environment_vision.png")
 
 
 def save_heuristic_gif(output_dir: Path, seed: int, frame_count: int, fps: int) -> None:
@@ -157,7 +157,7 @@ def save_heuristic_gif(output_dir: Path, seed: int, frame_count: int, fps: int) 
                 )
             pygame.image.save(surface, frames_dir / f"frame_{frame_idx:04d}.png")
 
-        encode_gif(frames_dir, output_dir / "agent_movement.gif", fps)
+        encode_gif(frames_dir, output_dir / "agent_scan_movement.gif", fps)
 
 
 def save_ppo_gif(
@@ -207,7 +207,7 @@ def save_ppo_gif(
                 )
             pygame.image.save(surface, frames_dir / f"frame_{frame_idx:04d}.png")
 
-        encode_gif(frames_dir, output_dir / "ppo_trained.gif", fps)
+        encode_gif(frames_dir, output_dir / "ppo_scan_trained.gif", fps)
 
 
 def encode_gif(frames_dir: Path, output_path: Path, fps: int) -> None:
@@ -331,7 +331,7 @@ def save_trajectory_comparison(output_dir: Path, checkpoint: Path, seed: int) ->
         title="Trained PPO trajectory",
         font=font,
     )
-    pygame.image.save(surface, output_dir / "trajectory_comparison.png")
+    pygame.image.save(surface, output_dir / "trajectory_scan_comparison.png")
 
 
 def draw_trajectory_panel(
