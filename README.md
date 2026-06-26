@@ -210,6 +210,12 @@ gym_env.close()
 Actions:
 
 The environment uses a 6-bit `MultiBinary` action vector so movement and orientation can happen at the same time.
+PPO now uses a structured action policy internally: one categorical choice for
+movement (`noop`, cardinal directions, and diagonals) and one categorical choice
+for turning (`none`, left, right), then converts those two indices back to the
+6-bit environment action. This keeps the environment API unchanged while
+preventing contradictory PPO actions such as up+down, left+right, or turn
+left+turn right.
 
 | Index | Meaning |
 | --- | --- |
@@ -330,7 +336,7 @@ The code maps to the paper components as follows:
 - probability ratio: `ratio = exp(new_log_prob - old_log_prob)` in `compute_ppo_loss`
 - clipped surrogate objective: `torch.min(ratio * advantages, clipped_ratio * advantages)`
 - value-function loss: squared error between computed returns and value estimates
-- entropy bonus: Bernoulli policy entropy summed over the multi-binary action bits
+- entropy bonus: categorical movement entropy plus categorical turn entropy
 - advantage estimates: truncated GAE in `RolloutBuffer.compute_returns_and_advantages`
 - multiple epochs with shuffled mini-batches: the update loop in `train_ppo`
 - optional KL early stopping: `--target-kl` stops the current PPO update when

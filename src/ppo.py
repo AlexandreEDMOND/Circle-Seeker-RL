@@ -7,9 +7,36 @@ from typing import Any, Iterable
 import numpy as np
 import torch
 from torch import nn
-from torch.distributions import Bernoulli
+from torch.distributions import Categorical
 
 from src.gym_env import CircleSeekGymEnv
+
+STRUCTURED_ACTION_FORMAT = "structured-categorical-v1"
+STRUCTURED_ACTION_SIZE = 2
+MOVEMENT_ACTIONS = np.asarray(
+    [
+        [0, 0, 0, 0],  # noop
+        [1, 0, 0, 0],  # up
+        [0, 1, 0, 0],  # down
+        [0, 0, 1, 0],  # left
+        [0, 0, 0, 1],  # right
+        [1, 0, 1, 0],  # up-left
+        [1, 0, 0, 1],  # up-right
+        [0, 1, 1, 0],  # down-left
+        [0, 1, 0, 1],  # down-right
+    ],
+    dtype=np.int8,
+)
+TURN_ACTIONS = np.asarray(
+    [
+        [0, 0],  # none
+        [1, 0],  # turn left
+        [0, 1],  # turn right
+    ],
+    dtype=np.int8,
+)
+MOVEMENT_ACTION_COUNT = int(MOVEMENT_ACTIONS.shape[0])
+TURN_ACTION_COUNT = int(TURN_ACTIONS.shape[0])
 
 
 @dataclass(frozen=True)
@@ -45,45 +72,61 @@ class PPOConfig:
 
 
 class ActorCritic(nn.Module):
-    """Shared MLP actor-critic for a multi-binary action space."""
+    """Shared MLP actor-critic for structured movement and turn actions."""
 
     def __init__(
         self,
         observation_size: int,
-        action_count: int,
+        action_count: int = 6,
         hidden_size: int = 64,
     ) -> None:
         super().__init__()
+        self.action_count = action_count
         self.shared = nn.Sequential(
             nn.Linear(observation_size, hidden_size),
             nn.Tanh(),
             nn.Linear(hidden_size, hidden_size),
             nn.Tanh(),
         )
-        self.policy_head = nn.Linear(hidden_size, action_count)
+        self.movement_policy_head = nn.Linear(hidden_size, MOVEMENT_ACTION_COUNT)
+        self.turn_policy_head = nn.Linear(hidden_size, TURN_ACTION_COUNT)
         self.value_head = nn.Linear(hidden_size, 1)
 
-    def forward(self, observations: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self,
+        observations: torch.Tensor,
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
         features = self.shared(observations)
-        logits = self.policy_head(features)
+        movement_logits = self.movement_policy_head(features)
+        turn_logits = self.turn_policy_head(features)
         values = self.value_head(features).squeeze(-1)
-        return logits, values
+        return (movement_logits, turn_logits), values
 
     def get_action_and_value(
         self,
         observations: torch.Tensor,
         actions: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-        logits, values = self(observations)
-        distribution = Bernoulli(logits=logits)
+        (movement_logits, turn_logits), values = self(observations)
+        movement_distribution = Categorical(logits=movement_logits)
+        turn_distribution = Categorical(logits=turn_logits)
 
         if actions is None:
-            actions = distribution.sample()
+            movement_actions = movement_distribution.sample()
+            turn_actions = turn_distribution.sample()
+            actions = torch.stack((movement_actions, turn_actions), dim=-1)
         else:
-            actions = actions.to(dtype=torch.float32)
+            actions = actions.to(dtype=torch.long)
+            if actions.ndim == 1:
+                actions = actions.reshape(-1, STRUCTURED_ACTION_SIZE)
+            movement_actions = actions[:, 0]
+            turn_actions = actions[:, 1]
 
-        log_probs = distribution.log_prob(actions).sum(dim=-1)
-        entropy = distribution.entropy().sum(dim=-1)
+        log_probs = (
+            movement_distribution.log_prob(movement_actions)
+            + turn_distribution.log_prob(turn_actions)
+        )
+        entropy = movement_distribution.entropy() + turn_distribution.entropy()
         return actions, log_probs, entropy, values
 
 
@@ -111,7 +154,7 @@ class RolloutBuffer:
         )
         self.actions = torch.zeros(
             (rollout_length, action_size),
-            dtype=torch.float32,
+            dtype=torch.long,
             device=self.device,
         )
         self.rewards = torch.zeros(rollout_length, dtype=torch.float32, device=self.device)
@@ -149,7 +192,7 @@ class RolloutBuffer:
                 f"got {tuple(observation.shape)}."
             )
 
-        action = torch.as_tensor(action, dtype=torch.float32, device=self.device)
+        action = torch.as_tensor(action, dtype=torch.long, device=self.device)
         if action.shape == ():
             action = action.reshape(1)
         if action.shape != (self.action_size,):
@@ -204,6 +247,31 @@ class RolloutBuffer:
         dtype: torch.dtype,
     ) -> torch.Tensor:
         return torch.as_tensor(value, dtype=dtype, device=self.device).reshape(())
+
+
+def structured_action_to_multibinary(
+    action: Iterable[int] | np.ndarray | torch.Tensor,
+) -> np.ndarray:
+    if isinstance(action, torch.Tensor):
+        structured_action = action.detach().cpu().numpy().astype(np.int64).reshape(-1)
+    else:
+        structured_action = np.asarray(action, dtype=np.int64).reshape(-1)
+    if structured_action.shape != (STRUCTURED_ACTION_SIZE,):
+        raise ValueError(
+            f"Expected structured action shape {(STRUCTURED_ACTION_SIZE,)}, "
+            f"got {tuple(structured_action.shape)}."
+        )
+
+    movement_index = int(structured_action[0])
+    turn_index = int(structured_action[1])
+    if not 0 <= movement_index < MOVEMENT_ACTION_COUNT:
+        raise ValueError(f"Invalid movement action index: {movement_index}.")
+    if not 0 <= turn_index < TURN_ACTION_COUNT:
+        raise ValueError(f"Invalid turn action index: {turn_index}.")
+
+    return np.concatenate(
+        (MOVEMENT_ACTIONS[movement_index], TURN_ACTIONS[turn_index])
+    ).astype(np.int8)
 
 
 def action_conflict_count(action: Iterable[int | float | bool] | np.ndarray) -> int:
@@ -265,11 +333,10 @@ def collect_rollout(
     device = torch.device(device)
     observation, reset_info = env.reset(seed=seed)
     observation_size = int(env.observation_space.shape[0])
-    action_size = int(env.action_space.n)
     buffer = RolloutBuffer(
         rollout_length=rollout_length,
         observation_size=observation_size,
-        action_size=action_size,
+        action_size=STRUCTURED_ACTION_SIZE,
         device=device,
     )
 
@@ -301,13 +368,14 @@ def collect_rollout(
         with torch.no_grad():
             action_tensor, log_prob, _, value = model.get_action_and_value(observation_tensor)
 
-        action = action_tensor.squeeze(0).cpu().numpy().astype(np.int8)
-        next_observation, reward, terminated, truncated, step_info = env.step(action)
+        structured_action = action_tensor.squeeze(0)
+        env_action = structured_action_to_multibinary(structured_action)
+        next_observation, reward, terminated, truncated, step_info = env.step(env_action)
         done = terminated or truncated
         current_distance = float(step_info["distance_to_target"])
         distance_delta = previous_distance - current_distance
-        conflict_count = action_conflict_count(action)
-        turning = action_turns(action)
+        conflict_count = action_conflict_count(env_action)
+        turning = action_turns(env_action)
         target_visible = bool(step_info["target_visible"])
         target_found = target_visible and not previous_target_visible
         no_vision_no_turn = not target_visible and not turning
@@ -328,7 +396,7 @@ def collect_rollout(
 
         buffer.add(
             observation=observation,
-            action=action,
+            action=structured_action,
             reward=training_reward,
             done=done,
             value=value.squeeze(0),
@@ -410,7 +478,7 @@ def compute_ppo_loss(
     value_coef: float = 0.5,
     entropy_coef: float = 0.01,
 ) -> dict[str, torch.Tensor]:
-    """Compute PPO clipped objective terms for a Bernoulli multi-binary policy."""
+    """Compute PPO clipped objective terms for the structured categorical policy."""
 
     _, new_log_probs, entropy, values = model.get_action_and_value(observations, actions)
     ratio = (new_log_probs - old_log_probs).exp()
@@ -501,12 +569,14 @@ def select_action(
     observation_tensor = torch.as_tensor(observation, dtype=torch.float32).unsqueeze(0)
     with torch.no_grad():
         if deterministic:
-            logits, _ = model(observation_tensor)
-            action = (logits.squeeze(0) >= 0.0).to(dtype=torch.int8)
+            (movement_logits, turn_logits), _ = model(observation_tensor)
+            movement_action = movement_logits.argmax(dim=-1)
+            turn_action = turn_logits.argmax(dim=-1)
+            action = torch.stack((movement_action, turn_action), dim=-1)
         else:
             action, _, _, _ = model.get_action_and_value(observation_tensor)
-            action = action.squeeze(0).to(dtype=torch.int8)
-    return action.cpu().numpy()
+        structured_action = action.squeeze(0)
+    return structured_action_to_multibinary(structured_action)
 
 
 def train_ppo(
@@ -764,6 +834,9 @@ def save_checkpoint(
             "config": asdict(config),
             "observation_size": observation_size,
             "action_size": action_size,
+            "action_format": STRUCTURED_ACTION_FORMAT,
+            "movement_action_count": MOVEMENT_ACTION_COUNT,
+            "turn_action_count": TURN_ACTION_COUNT,
             "training_metrics": metrics,
         },
         path,
@@ -773,14 +846,48 @@ def save_checkpoint(
 def load_checkpoint(path: Path) -> tuple[ActorCritic, PPOConfig, dict[str, Any]]:
     checkpoint = torch.load(path, map_location="cpu", weights_only=False)
     config = PPOConfig(**checkpoint["config"])
+    action_format = checkpoint.get("action_format")
     model = ActorCritic(
         int(checkpoint["observation_size"]),
         int(checkpoint["action_size"]),
         config.hidden_size,
     )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    state_dict = checkpoint["model_state_dict"]
+    if action_format is None and "policy_head.weight" in state_dict:
+        state_dict = _convert_legacy_bernoulli_state_dict(state_dict)
+    elif action_format != STRUCTURED_ACTION_FORMAT:
+        raise ValueError(f"Unsupported PPO action format: {action_format!r}.")
+    model.load_state_dict(state_dict)
     model.eval()
     return model, config, dict(checkpoint.get("training_metrics", {}))
+
+
+def _convert_legacy_bernoulli_state_dict(
+    state_dict: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    converted = {
+        key: value
+        for key, value in state_dict.items()
+        if not key.startswith("policy_head.")
+    }
+    policy_weight = state_dict["policy_head.weight"]
+    policy_bias = state_dict["policy_head.bias"]
+
+    movement_matrix = torch.as_tensor(
+        MOVEMENT_ACTIONS,
+        dtype=policy_weight.dtype,
+        device=policy_weight.device,
+    )
+    turn_matrix = torch.as_tensor(
+        TURN_ACTIONS,
+        dtype=policy_weight.dtype,
+        device=policy_weight.device,
+    )
+    converted["movement_policy_head.weight"] = movement_matrix @ policy_weight[:4]
+    converted["movement_policy_head.bias"] = movement_matrix @ policy_bias[:4]
+    converted["turn_policy_head.weight"] = turn_matrix @ policy_weight[4:6]
+    converted["turn_policy_head.bias"] = turn_matrix @ policy_bias[4:6]
+    return converted
 
 
 def evaluate_checkpoint(

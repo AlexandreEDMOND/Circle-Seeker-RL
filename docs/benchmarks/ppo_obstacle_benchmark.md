@@ -30,6 +30,13 @@ only slightly improves over random return. That makes the next implementation
 target clear: improve the action policy/evaluation behavior before scaling
 training time.
 
+Implementation note: these benchmark numbers were produced before PPO switched
+from six independent Bernoulli action bits to a structured categorical policy.
+The environment still receives the same 6-bit `MultiBinary` action, but PPO now
+samples movement and turn categories separately and converts them at the
+environment boundary. New obstacle results should be recorded separately from
+the table above.
+
 ## Reproduction Commands
 
 Baseline evaluation:
