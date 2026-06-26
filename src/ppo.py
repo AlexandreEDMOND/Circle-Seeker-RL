@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch import nn
 from torch.distributions import Categorical
+from tqdm.auto import tqdm
 
 from src.gym_env import CircleSeekGymEnv
 
@@ -582,6 +583,8 @@ def select_action(
 def train_ppo(
     config: PPOConfig,
     checkpoint_path: Path | None = None,
+    *,
+    progress: bool = False,
 ) -> dict[str, Any]:
     rng = set_seed(config.seed)
     _, stage_progress = curriculum_stage(config, 0)
@@ -617,6 +620,12 @@ def train_ppo(
         for idx in range(max(config.curriculum_stages if config.curriculum else 1, 1))
     ]
 
+    progress_bar = tqdm(
+        total=config.total_timesteps,
+        desc="Training PPO",
+        unit="step",
+        disable=not progress,
+    )
     while global_step < config.total_timesteps:
         stage_index, stage_progress = curriculum_stage(config, global_step)
         env = build_env(config, stage_progress)
@@ -636,6 +645,7 @@ def train_ppo(
             no_vision_no_turn_penalty=config.no_vision_no_turn_penalty,
         )
         global_step += rollout_size
+        progress_bar.update(rollout_size)
 
         completed_returns.extend(rollout_info["episode_returns"])
         completed_training_returns.extend(rollout_info["episode_training_returns"])
@@ -752,7 +762,17 @@ def train_ppo(
                 "clip_fraction": _mean_or_zero(update_loss_history["clip_fraction"]),
             }
         )
+        latest_update = update_history[-1]
+        progress_bar.set_postfix(
+            {
+                "success": f"{latest_update['success_rate']:.3f}",
+                "collision": f"{latest_update['collision_rate']:.3f}",
+                "return": f"{latest_update['mean_return']:.3f}",
+                "stage": stage_index,
+            }
+        )
 
+    progress_bar.close()
     episode_count = len(completed_returns)
     metrics = {
         "timesteps": global_step,

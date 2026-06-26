@@ -10,6 +10,7 @@ dependencies = [
     "numpy>=1.26",
     "pygame>=2.5",
     "torch>=2.12.1",
+    "tqdm>=4.68.3",
 ]
 
 [dependency-groups]

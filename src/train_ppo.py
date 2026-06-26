@@ -93,6 +93,11 @@ def parse_args() -> argparse.Namespace:
         default=Path("checkpoints/ppo.pt"),
         help="Where to save the trained checkpoint.",
     )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        help="Disable the tqdm progress bar.",
+    )
     return parser.parse_args()
 
 
@@ -128,7 +133,7 @@ def main() -> None:
         curriculum_start_obstacle_speed=args.curriculum_start_obstacle_speed,
         curriculum_start_obstacle_radius=args.curriculum_start_obstacle_radius,
     )
-    metrics = train_ppo(config, args.checkpoint)
+    metrics = train_ppo(config, args.checkpoint, progress=not args.no_progress)
     print(json.dumps(metrics, indent=2, sort_keys=True))
     print(f"Saved checkpoint: {args.checkpoint}")
 
