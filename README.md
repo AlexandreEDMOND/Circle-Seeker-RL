@@ -154,7 +154,7 @@ evaluation with `--episodes 20 --seed 456` produced:
 
 ## Benchmark Snapshot
 
-Short obstacle-heavy benchmark, evaluated over 30 episodes with seed `900`:
+Obstacle-heavy benchmark, evaluated with seed `900`:
 
 | Policy | Success | Collision | Timeout | Mean return |
 | --- | ---: | ---: | ---: | ---: |
@@ -162,10 +162,51 @@ Short obstacle-heavy benchmark, evaluated over 30 episodes with seed `900`:
 | Target-seeking heuristic | 0.767 | 0.233 | 0.000 | 4.847 |
 | PPO simple checkpoint, no-obstacle eval | 0.200 | 0.000 | 0.800 | -0.582 |
 | PPO obstacles, direct 20k tuning, mean over seeds 101/202/303 | 0.011 | 0.344 | 0.644 | -5.565 |
+| PPO V1 short, structured actions + curriculum + obstacle proximity penalty | 0.800 | 0.200 | 0.000 | 5.143 |
 
-The current PPO obstacle tuning does not solve the task yet. See
-`docs/benchmarks/ppo_obstacle_benchmark.md` for exact reproduction commands,
-per-seed notes, and the failed curriculum variant.
+The V1 short checkpoint was evaluated over 50 deterministic episodes with:
+
+```bash
+uv run python -m src.evaluate_ppo checkpoints/v1/ppo_v1_short_best.pt --episodes 50 --seed 900
+```
+
+Its local evaluation also reported `near_obstacle_rate = 0.250`,
+`mean_nearest_obstacle_clearance = 112.009`, and `turn_action_rate = 0.995`.
+The checkpoint itself is ignored by git under `checkpoints/`; reproduce it with:
+
+```bash
+uv run python -m src.train_ppo \
+  --total-timesteps 300000 \
+  --rollout-steps 2048 \
+  --update-epochs 4 \
+  --minibatch-size 256 \
+  --hidden-size 128 \
+  --learning-rate 0.00025 \
+  --seed 202 \
+  --obstacle-count 4 \
+  --max-steps 300 \
+  --min-target-distance 120 \
+  --distance-reward-coef 0.2 \
+  --target-visible-reward-coef 0.02 \
+  --target-found-reward-coef 0.2 \
+  --no-vision-no-turn-penalty 0.005 \
+  --obstacle-proximity-penalty-coef 0.05 \
+  --obstacle-proximity-threshold 60 \
+  --target-kl 0.03 \
+  --curriculum \
+  --curriculum-stages 5 \
+  --curriculum-start-obstacle-speed 0.0 \
+  --curriculum-start-obstacle-radius 0.0 \
+  --eval-every 50000 \
+  --eval-episodes 10 \
+  --eval-seed 900 \
+  --checkpoint checkpoints/v1/ppo_v1_short_last.pt \
+  --best-checkpoint checkpoints/v1/ppo_v1_short_best.pt \
+  --no-progress
+```
+
+See `docs/benchmarks/ppo_obstacle_benchmark.md` for older short-run benchmark
+notes from before the V1 obstacle-proximity shaping pass.
 
 ## Test
 

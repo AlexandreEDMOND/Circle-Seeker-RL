@@ -17,6 +17,11 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Sample from the policy instead of using deterministic argmax actions.",
     )
+    parser.add_argument(
+        "--include-training-metrics",
+        action="store_true",
+        help="Include the full checkpoint training history in the JSON output.",
+    )
     return parser.parse_args()
 
 
@@ -27,6 +32,7 @@ def main() -> None:
         episodes=args.episodes,
         seed=args.seed,
         deterministic=not args.sample,
+        include_training_metrics=args.include_training_metrics,
     )
     print(json.dumps(metrics, indent=2, sort_keys=True))
 

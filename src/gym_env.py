@@ -1,9 +1,17 @@
 from __future__ import annotations
 
+import warnings
 from typing import Any
 
 import gymnasium as gym
 import numpy as np
+
+warnings.filterwarnings(
+    "ignore",
+    message="pkg_resources is deprecated.*",
+    category=UserWarning,
+)
+
 import pygame
 from gymnasium import spaces
 

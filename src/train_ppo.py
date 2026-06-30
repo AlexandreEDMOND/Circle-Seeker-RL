@@ -56,6 +56,18 @@ def parse_args() -> argparse.Namespace:
         default=PPOConfig.no_vision_no_turn_penalty,
         help="Training-only penalty when the target is hidden and the agent does not turn.",
     )
+    parser.add_argument(
+        "--obstacle-proximity-penalty-coef",
+        type=float,
+        default=PPOConfig.obstacle_proximity_penalty_coef,
+        help="Training-only penalty coefficient for moving too close to obstacles.",
+    )
+    parser.add_argument(
+        "--obstacle-proximity-threshold",
+        type=float,
+        default=PPOConfig.obstacle_proximity_threshold,
+        help="Clearance distance below which obstacle proximity is penalized.",
+    )
     parser.add_argument("--hidden-size", type=int, default=PPOConfig.hidden_size)
     parser.add_argument("--seed", type=int, default=PPOConfig.seed)
     parser.add_argument("--obstacle-count", type=int, default=PPOConfig.obstacle_count)
@@ -94,6 +106,30 @@ def parse_args() -> argparse.Namespace:
         help="Where to save the trained checkpoint.",
     )
     parser.add_argument(
+        "--best-checkpoint",
+        type=Path,
+        default=None,
+        help="Where to save the best checkpoint selected by evaluation score.",
+    )
+    parser.add_argument(
+        "--eval-every",
+        type=int,
+        default=PPOConfig.eval_every,
+        help="Evaluate every N training steps. Set to 0 to disable periodic evaluation.",
+    )
+    parser.add_argument(
+        "--eval-episodes",
+        type=int,
+        default=PPOConfig.eval_episodes,
+        help="Episodes per periodic evaluation.",
+    )
+    parser.add_argument(
+        "--eval-seed",
+        type=int,
+        default=PPOConfig.eval_seed,
+        help="Base seed for periodic evaluation.",
+    )
+    parser.add_argument(
         "--no-progress",
         action="store_true",
         help="Disable the tqdm progress bar.",
@@ -121,6 +157,8 @@ def main() -> None:
         target_visible_reward_coef=args.target_visible_reward_coef,
         target_found_reward_coef=args.target_found_reward_coef,
         no_vision_no_turn_penalty=args.no_vision_no_turn_penalty,
+        obstacle_proximity_penalty_coef=args.obstacle_proximity_penalty_coef,
+        obstacle_proximity_threshold=args.obstacle_proximity_threshold,
         hidden_size=args.hidden_size,
         seed=args.seed,
         obstacle_count=args.obstacle_count,
@@ -132,10 +170,20 @@ def main() -> None:
         curriculum_stages=args.curriculum_stages,
         curriculum_start_obstacle_speed=args.curriculum_start_obstacle_speed,
         curriculum_start_obstacle_radius=args.curriculum_start_obstacle_radius,
+        eval_every=args.eval_every,
+        eval_episodes=args.eval_episodes,
+        eval_seed=args.eval_seed,
     )
-    metrics = train_ppo(config, args.checkpoint, progress=not args.no_progress)
+    metrics = train_ppo(
+        config,
+        args.checkpoint,
+        best_checkpoint_path=args.best_checkpoint,
+        progress=not args.no_progress,
+    )
     print(json.dumps(metrics, indent=2, sort_keys=True))
     print(f"Saved checkpoint: {args.checkpoint}")
+    if args.best_checkpoint is not None:
+        print(f"Saved best checkpoint: {args.best_checkpoint}")
 
 
 if __name__ == "__main__":

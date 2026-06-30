@@ -12,6 +12,8 @@ from src.ppo import (
     collect_rollout,
     compute_ppo_loss,
     evaluate_checkpoint,
+    nearest_obstacle_clearance,
+    obstacle_proximity_penalty,
     select_action,
     should_stop_for_kl,
     structured_action_to_multibinary,
@@ -249,6 +251,29 @@ def test_target_visibility_training_reward_shapes_search_behavior() -> None:
     ) == pytest.approx(-0.005)
 
 
+def test_obstacle_proximity_penalty_scales_with_clearance() -> None:
+    assert obstacle_proximity_penalty(
+        None,
+        threshold=60.0,
+        penalty_coef=0.05,
+    ) == pytest.approx(0.0)
+    assert obstacle_proximity_penalty(
+        90.0,
+        threshold=60.0,
+        penalty_coef=0.05,
+    ) == pytest.approx(0.0)
+    assert obstacle_proximity_penalty(
+        30.0,
+        threshold=60.0,
+        penalty_coef=0.05,
+    ) == pytest.approx(0.025)
+    assert obstacle_proximity_penalty(
+        -5.0,
+        threshold=60.0,
+        penalty_coef=0.05,
+    ) == pytest.approx(0.05)
+
+
 def test_collect_rollout_fills_buffer_and_computes_returns() -> None:
     rollout_length = 8
     observation_size = 12
@@ -277,6 +302,10 @@ def test_collect_rollout_fills_buffer_and_computes_returns() -> None:
     assert "target_found_steps" in info
     assert "turn_steps" in info
     assert "no_vision_no_turn_steps" in info
+    assert "near_obstacle_steps" in info
+    assert "obstacle_proximity_penalty_sum" in info
+    assert "mean_nearest_obstacle_clearance" in info
+    assert "min_nearest_obstacle_clearance" in info
     assert torch.all(buffer.actions[:, 0] >= 0)
     assert torch.all(buffer.actions[:, 0] < 9)
     assert torch.all(buffer.actions[:, 1] >= 0)
@@ -327,6 +356,7 @@ def test_build_env_passes_min_target_distance_from_config() -> None:
     env = build_env(PPOConfig(obstacle_count=0, min_target_distance=80.0))
 
     assert env.env.min_target_distance == 80.0
+    assert nearest_obstacle_clearance(env) is None
 
 
 def test_compute_ppo_loss_returns_scalar_diagnostics() -> None:
@@ -423,6 +453,7 @@ def test_train_ppo_stops_update_early_when_target_kl_is_exceeded(
 
 def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     checkpoint = tmp_path / "ppo.pt"
+    best_checkpoint = tmp_path / "ppo_best.pt"
     config = PPOConfig(
         total_timesteps=16,
         rollout_steps=8,
@@ -432,13 +463,23 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
         seed=123,
         obstacle_count=0,
         max_steps=5,
+        eval_every=8,
+        eval_episodes=1,
+        eval_seed=456,
     )
 
-    train_metrics = train_ppo(config, checkpoint)
+    train_metrics = train_ppo(config, checkpoint, best_checkpoint_path=best_checkpoint)
     eval_metrics = evaluate_checkpoint(checkpoint, episodes=2, seed=456)
+    full_eval_metrics = evaluate_checkpoint(
+        checkpoint,
+        episodes=2,
+        seed=456,
+        include_training_metrics=True,
+    )
     checkpoint_payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
 
     assert checkpoint.exists()
+    assert best_checkpoint.exists()
     assert checkpoint_payload["action_format"] == "structured-categorical-v1"
     assert checkpoint_payload["movement_action_count"] == 9
     assert checkpoint_payload["turn_action_count"] == 3
@@ -460,6 +501,14 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     assert "target_found_rate" in train_metrics
     assert "turn_action_rate" in train_metrics
     assert "no_vision_no_turn_rate" in train_metrics
+    assert "near_obstacle_rate" in train_metrics
+    assert "mean_obstacle_proximity_penalty" in train_metrics
+    assert "obstacle_proximity_penalty_coef" in train_metrics
+    assert "obstacle_proximity_threshold" in train_metrics
+    assert "best_eval_score" in train_metrics
+    assert "best_eval" in train_metrics
+    assert "eval_history" in train_metrics
+    assert len(train_metrics["eval_history"]) == 2
     assert len(train_metrics["updates"]) == 2
     assert train_metrics["updates"][0]["global_step"] == 8
     assert "mean_return" in train_metrics["updates"][0]
@@ -468,6 +517,14 @@ def test_train_ppo_saves_checkpoint_and_evaluates(tmp_path) -> None:
     assert "kl_early_stopped" in train_metrics["updates"][0]
     assert "optimized_minibatches" in train_metrics["updates"][0]
     assert eval_metrics["episodes"] == 2
+    assert "training_metrics" not in eval_metrics
+    assert "turn_action_rate" in eval_metrics
+    assert "target_visible_rate" in eval_metrics
+    assert "near_obstacle_rate" in eval_metrics
+    assert "mean_nearest_obstacle_clearance" in eval_metrics
+    assert "min_nearest_obstacle_clearance" in eval_metrics
+    assert "training_metrics" in full_eval_metrics
+    assert full_eval_metrics["training_metrics"]["timesteps"] == 16
     assert (
         eval_metrics["successes"]
         + eval_metrics["collisions"]

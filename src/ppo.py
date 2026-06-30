@@ -56,6 +56,8 @@ class PPOConfig:
     target_visible_reward_coef: float = 0.02
     target_found_reward_coef: float = 0.2
     no_vision_no_turn_penalty: float = 0.005
+    obstacle_proximity_penalty_coef: float = 0.0
+    obstacle_proximity_threshold: float = 60.0
     learning_rate: float = 3e-4
     max_grad_norm: float = 0.5
     target_kl: float | None = None
@@ -70,6 +72,9 @@ class PPOConfig:
     curriculum_stages: int = 4
     curriculum_start_obstacle_speed: float = 0.0
     curriculum_start_obstacle_radius: float = 0.0
+    eval_every: int = 0
+    eval_episodes: int = 20
+    eval_seed: int = 900
 
 
 class ActorCritic(nn.Module):
@@ -310,6 +315,31 @@ def target_visibility_training_reward(
     return reward
 
 
+def nearest_obstacle_clearance(env: CircleSeekGymEnv) -> float | None:
+    if not env.env.obstacles:
+        return None
+    return float(
+        min(
+            env.env._distance(env.env.agent_position, obstacle.position)
+            - env.env.agent_radius
+            - obstacle.radius
+            for obstacle in env.env.obstacles
+        )
+    )
+
+
+def obstacle_proximity_penalty(
+    clearance: float | None,
+    *,
+    threshold: float,
+    penalty_coef: float,
+) -> float:
+    if clearance is None or threshold <= 0.0 or penalty_coef <= 0.0:
+        return 0.0
+    proximity = np.clip((threshold - clearance) / threshold, 0.0, 1.0)
+    return float(penalty_coef * proximity)
+
+
 def collect_rollout(
     model: ActorCritic,
     rollout_length: int,
@@ -325,6 +355,8 @@ def collect_rollout(
     target_visible_reward_coef: float = 0.0,
     target_found_reward_coef: float = 0.0,
     no_vision_no_turn_penalty: float = 0.0,
+    obstacle_proximity_penalty_coef: float = 0.0,
+    obstacle_proximity_threshold: float = 60.0,
 ) -> tuple[RolloutBuffer, dict]:
     """Collect one fixed-length rollout from CircleSeekGymEnv."""
 
@@ -358,6 +390,9 @@ def collect_rollout(
     target_found_steps = 0
     turn_steps = 0
     no_vision_no_turn_steps = 0
+    near_obstacle_steps = 0
+    obstacle_proximity_penalty_sum = 0.0
+    nearest_obstacle_clearances: list[float] = []
 
     for _ in range(rollout_length):
         observation_tensor = torch.as_tensor(
@@ -380,6 +415,12 @@ def collect_rollout(
         target_visible = bool(step_info["target_visible"])
         target_found = target_visible and not previous_target_visible
         no_vision_no_turn = not target_visible and not turning
+        obstacle_clearance = nearest_obstacle_clearance(env)
+        obstacle_penalty = obstacle_proximity_penalty(
+            obstacle_clearance,
+            threshold=obstacle_proximity_threshold,
+            penalty_coef=obstacle_proximity_penalty_coef,
+        )
         visibility_reward = target_visibility_training_reward(
             target_visible=target_visible,
             previous_target_visible=previous_target_visible,
@@ -393,6 +434,7 @@ def collect_rollout(
             + distance_reward_coef * distance_delta / max(float(env.env.agent_speed), 1.0)
             + visibility_reward
             - action_conflict_penalty * conflict_count
+            - obstacle_penalty
         )
 
         buffer.add(
@@ -412,6 +454,10 @@ def collect_rollout(
         target_found_steps += int(target_found)
         turn_steps += int(turning)
         no_vision_no_turn_steps += int(no_vision_no_turn)
+        obstacle_proximity_penalty_sum += obstacle_penalty
+        if obstacle_clearance is not None:
+            nearest_obstacle_clearances.append(obstacle_clearance)
+            near_obstacle_steps += int(obstacle_clearance <= obstacle_proximity_threshold)
 
         if done:
             episode_returns.append(float(episode_env_return))
@@ -462,6 +508,18 @@ def collect_rollout(
         "target_found_steps": target_found_steps,
         "turn_steps": turn_steps,
         "no_vision_no_turn_steps": no_vision_no_turn_steps,
+        "near_obstacle_steps": near_obstacle_steps,
+        "obstacle_proximity_penalty_sum": obstacle_proximity_penalty_sum,
+        "mean_nearest_obstacle_clearance": (
+            float(np.mean(nearest_obstacle_clearances))
+            if nearest_obstacle_clearances
+            else None
+        ),
+        "min_nearest_obstacle_clearance": (
+            float(np.min(nearest_obstacle_clearances))
+            if nearest_obstacle_clearances
+            else None
+        ),
         "last_value": float(last_value.squeeze(0).item()),
     }
     return buffer, info
@@ -580,10 +638,103 @@ def select_action(
     return structured_action_to_multibinary(structured_action)
 
 
+def evaluate_model(
+    model: ActorCritic,
+    config: PPOConfig,
+    *,
+    episodes: int = 20,
+    seed: int = 123,
+    deterministic: bool = True,
+) -> dict[str, Any]:
+    was_training = model.training
+    model.eval()
+    env = build_env(config)
+    status_counts = {"success": 0, "collision": 0, "timeout": 0}
+    returns: list[float] = []
+    lengths: list[int] = []
+    moving_steps: list[int] = []
+    initial_distances: list[float] = []
+    final_distances: list[float] = []
+    nearest_obstacle_clearances: list[float] = []
+    near_obstacle_threshold = config.obstacle_proximity_threshold
+    near_obstacle_steps = 0
+    turn_steps = 0
+    target_visible_steps = 0
+    total_steps = 0
+
+    for episode_idx in range(episodes):
+        observation, info = env.reset(seed=seed + episode_idx)
+        total_reward = 0.0
+        length = 0
+        moved = 0
+        initial_distances.append(float(info["distance_to_target"]))
+
+        while True:
+            before = env.env.agent_position.copy()
+            action = select_action(model, observation, deterministic=deterministic)
+            observation, reward, terminated, truncated, info = env.step(action)
+            after = env.env.agent_position.copy()
+            total_reward += float(reward)
+            length += 1
+            total_steps += 1
+            turn_steps += int(action_turns(action))
+            target_visible_steps += int(bool(info["target_visible"]))
+            if np.linalg.norm(after - before) > 1e-6:
+                moved += 1
+
+            obstacle_clearance = nearest_obstacle_clearance(env)
+            if obstacle_clearance is not None:
+                nearest_obstacle_clearances.append(obstacle_clearance)
+                near_obstacle_steps += int(obstacle_clearance <= near_obstacle_threshold)
+
+            if terminated or truncated:
+                status = str(info["status"])
+                status_counts[status] = status_counts.get(status, 0) + 1
+                returns.append(total_reward)
+                lengths.append(length)
+                moving_steps.append(moved)
+                final_distances.append(float(info["distance_to_target"]))
+                break
+
+    if was_training:
+        model.train()
+
+    return {
+        "episodes": episodes,
+        "success_rate": status_counts["success"] / episodes,
+        "collision_rate": status_counts["collision"] / episodes,
+        "timeout_rate": status_counts["timeout"] / episodes,
+        "mean_return": float(np.mean(returns)),
+        "mean_episode_length": float(np.mean(lengths)),
+        "mean_moving_steps": float(np.mean(moving_steps)),
+        "movement_rate": float(np.sum(moving_steps) / max(total_steps, 1)),
+        "turn_action_rate": turn_steps / max(total_steps, 1),
+        "target_visible_rate": target_visible_steps / max(total_steps, 1),
+        "near_obstacle_rate": near_obstacle_steps / max(total_steps, 1),
+        "near_obstacle_clearance_threshold": near_obstacle_threshold,
+        "mean_nearest_obstacle_clearance": (
+            float(np.mean(nearest_obstacle_clearances))
+            if nearest_obstacle_clearances
+            else None
+        ),
+        "min_nearest_obstacle_clearance": (
+            float(np.min(nearest_obstacle_clearances))
+            if nearest_obstacle_clearances
+            else None
+        ),
+        "mean_initial_distance": float(np.mean(initial_distances)),
+        "mean_final_distance": float(np.mean(final_distances)),
+        "successes": status_counts["success"],
+        "collisions": status_counts["collision"],
+        "timeouts": status_counts["timeout"],
+    }
+
+
 def train_ppo(
     config: PPOConfig,
     checkpoint_path: Path | None = None,
     *,
+    best_checkpoint_path: Path | None = None,
     progress: bool = False,
 ) -> dict[str, Any]:
     rng = set_seed(config.seed)
@@ -606,6 +757,9 @@ def train_ppo(
     total_target_found_steps = 0
     total_turn_steps = 0
     total_no_vision_no_turn_steps = 0
+    total_near_obstacle_steps = 0
+    total_obstacle_proximity_penalty = 0.0
+    nearest_obstacle_clearances: list[float] = []
     status_counts = {"success": 0, "collision": 0, "timeout": 0}
     loss_history: dict[str, list[float]] = {
         "policy_loss": [],
@@ -615,6 +769,10 @@ def train_ppo(
         "clip_fraction": [],
     }
     update_history: list[dict[str, Any]] = []
+    eval_history: list[dict[str, Any]] = []
+    best_eval_score: float | None = None
+    best_eval_metrics: dict[str, Any] | None = None
+    next_eval_step = config.eval_every if config.eval_every > 0 else None
     stage_counts: list[dict[str, int]] = [
         {"stage": idx, "success": 0, "collision": 0, "timeout": 0}
         for idx in range(max(config.curriculum_stages if config.curriculum else 1, 1))
@@ -643,6 +801,8 @@ def train_ppo(
             target_visible_reward_coef=config.target_visible_reward_coef,
             target_found_reward_coef=config.target_found_reward_coef,
             no_vision_no_turn_penalty=config.no_vision_no_turn_penalty,
+            obstacle_proximity_penalty_coef=config.obstacle_proximity_penalty_coef,
+            obstacle_proximity_threshold=config.obstacle_proximity_threshold,
         )
         global_step += rollout_size
         progress_bar.update(rollout_size)
@@ -658,6 +818,14 @@ def train_ppo(
         total_target_found_steps += int(rollout_info["target_found_steps"])
         total_turn_steps += int(rollout_info["turn_steps"])
         total_no_vision_no_turn_steps += int(rollout_info["no_vision_no_turn_steps"])
+        total_near_obstacle_steps += int(rollout_info["near_obstacle_steps"])
+        total_obstacle_proximity_penalty += float(
+            rollout_info["obstacle_proximity_penalty_sum"]
+        )
+        if rollout_info["mean_nearest_obstacle_clearance"] is not None:
+            nearest_obstacle_clearances.append(
+                float(rollout_info["mean_nearest_obstacle_clearance"])
+            )
         for status in rollout_info["episode_statuses"]:
             status_counts[status] = status_counts.get(status, 0) + 1
             if status in stage_counts[stage_index]:
@@ -772,6 +940,43 @@ def train_ppo(
             }
         )
 
+        if next_eval_step is not None and global_step >= next_eval_step:
+            eval_metrics = evaluate_model(
+                model,
+                config,
+                episodes=config.eval_episodes,
+                seed=config.eval_seed,
+                deterministic=True,
+            )
+            eval_score = float(
+                eval_metrics["success_rate"] - eval_metrics["collision_rate"]
+            )
+            eval_record = {
+                "global_step": global_step,
+                "score": eval_score,
+                **eval_metrics,
+            }
+            eval_history.append(eval_record)
+            if best_eval_score is None or eval_score > best_eval_score:
+                best_eval_score = eval_score
+                best_eval_metrics = eval_record
+                if best_checkpoint_path is not None:
+                    save_checkpoint(
+                        best_checkpoint_path,
+                        model,
+                        config,
+                        observation_size,
+                        action_size,
+                        {
+                            "timesteps": global_step,
+                            "best_eval": best_eval_metrics,
+                            "eval_history": eval_history,
+                            "updates": update_history,
+                        },
+                    )
+            while next_eval_step is not None and global_step >= next_eval_step:
+                next_eval_step += config.eval_every
+
     progress_bar.close()
     episode_count = len(completed_returns)
     metrics = {
@@ -807,6 +1012,24 @@ def train_ppo(
         "target_found_rate": total_target_found_steps / max(global_step, 1),
         "turn_action_rate": total_turn_steps / max(global_step, 1),
         "no_vision_no_turn_rate": total_no_vision_no_turn_steps / max(global_step, 1),
+        "near_obstacle_rate": total_near_obstacle_steps / max(global_step, 1),
+        "mean_obstacle_proximity_penalty": (
+            total_obstacle_proximity_penalty / max(global_step, 1)
+        ),
+        "mean_nearest_obstacle_clearance": (
+            float(np.mean(nearest_obstacle_clearances))
+            if nearest_obstacle_clearances
+            else None
+        ),
+        "obstacle_proximity_penalty_coef": config.obstacle_proximity_penalty_coef,
+        "obstacle_proximity_threshold": config.obstacle_proximity_threshold,
+        "eval_every": config.eval_every,
+        "eval_episodes": config.eval_episodes,
+        "eval_seed": config.eval_seed,
+        "best_eval_score": best_eval_score,
+        "best_eval": best_eval_metrics,
+        "best_checkpoint": str(best_checkpoint_path) if best_checkpoint_path else None,
+        "eval_history": eval_history,
         "policy_loss": _mean_or_zero(loss_history["policy_loss"]),
         "value_loss": _mean_or_zero(loss_history["value_loss"]),
         "entropy": _mean_or_zero(loss_history["entropy"]),
@@ -916,57 +1139,19 @@ def evaluate_checkpoint(
     episodes: int = 20,
     seed: int = 123,
     deterministic: bool = True,
+    include_training_metrics: bool = False,
 ) -> dict[str, Any]:
     model, config, training_metrics = load_checkpoint(checkpoint_path)
-    env = build_env(config)
-    status_counts = {"success": 0, "collision": 0, "timeout": 0}
-    returns: list[float] = []
-    lengths: list[int] = []
-    moving_steps: list[int] = []
-    initial_distances: list[float] = []
-    final_distances: list[float] = []
-
-    for episode_idx in range(episodes):
-        observation, info = env.reset(seed=seed + episode_idx)
-        total_reward = 0.0
-        length = 0
-        moved = 0
-        initial_distances.append(float(info["distance_to_target"]))
-
-        while True:
-            before = env.env.agent_position.copy()
-            action = select_action(model, observation, deterministic=deterministic)
-            observation, reward, terminated, truncated, info = env.step(action)
-            after = env.env.agent_position.copy()
-            total_reward += float(reward)
-            length += 1
-            if np.linalg.norm(after - before) > 1e-6:
-                moved += 1
-
-            if terminated or truncated:
-                status = str(info["status"])
-                status_counts[status] = status_counts.get(status, 0) + 1
-                returns.append(total_reward)
-                lengths.append(length)
-                moving_steps.append(moved)
-                final_distances.append(float(info["distance_to_target"]))
-                break
-
-    return {
-        "episodes": episodes,
-        "success_rate": status_counts["success"] / episodes,
-        "collision_rate": status_counts["collision"] / episodes,
-        "timeout_rate": status_counts["timeout"] / episodes,
-        "mean_return": float(np.mean(returns)),
-        "mean_episode_length": float(np.mean(lengths)),
-        "mean_moving_steps": float(np.mean(moving_steps)),
-        "mean_initial_distance": float(np.mean(initial_distances)),
-        "mean_final_distance": float(np.mean(final_distances)),
-        "successes": status_counts["success"],
-        "collisions": status_counts["collision"],
-        "timeouts": status_counts["timeout"],
-        "training_metrics": training_metrics,
-    }
+    metrics = evaluate_model(
+        model,
+        config,
+        episodes=episodes,
+        seed=seed,
+        deterministic=deterministic,
+    )
+    if include_training_metrics:
+        metrics["training_metrics"] = training_metrics
+    return metrics
 
 
 def _mean_or_zero(values: list[float]) -> float:
