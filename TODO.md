@@ -1,65 +1,36 @@
 # TODO
 
-## Paper Setup
+## V1 Release
 
-- [x] Copy the PPO paper into the repository.
-- [x] Identify `Proximal Policy Optimization Algorithms.pdf` as the main implementation target.
-- [x] Read the PPO paper and extract implementation requirements:
-  - Use the clipped surrogate objective, not the KL-penalty variant, as the first implementation target.
-  - Compute probability ratios from stored old action log probabilities: `ratio = exp(new_log_prob - old_log_prob)`.
-  - Maximize `min(ratio * advantage, clip(ratio, 1 - epsilon, 1 + epsilon) * advantage)`.
-  - Add a squared value-function loss against computed returns.
-  - Add an entropy bonus to keep discrete-action exploration from collapsing too early.
-  - Use truncated Generalized Advantage Estimation with `gamma = 0.99` and `lambda = 0.95`.
-  - Optimize each rollout for multiple epochs with shuffled mini-batches and Adam.
-  - Track approximate KL and clip fraction as diagnostics; use KL early stopping later if updates become unstable.
-  - Start with paper defaults where reasonable: `epsilon = 0.2`, `epochs = 10`, `learning_rate = 3e-4`.
-  - Adapt the policy head to Circle Seeker's multi-binary action space with independent Bernoulli distributions.
+- [x] Tag the first complete PPO workflow as `v1.0.0`.
+- [x] Document the V1 scope, benchmark snapshot, and reproduction commands.
+- [x] Keep trained checkpoints out of git and document how to regenerate them.
+- [x] Publish the GitHub release for `v1.0.0`.
 
-## Environment
+## V2: Reproducible Benchmarks
 
-- [x] Add Gymnasium as a dependency.
-- [x] Wrap `CircleSeekEnv` as `gymnasium.Env`.
-- [x] Define `observation_space` and `action_space`.
-- [x] Keep the existing pygame renderer usable after the Gymnasium wrapper.
-- [x] Add tests for Gymnasium-compatible reset and step signatures.
-- [x] Add deterministic evaluation seeds.
+- [ ] Add a benchmark matrix script for multi-seed PPO training and evaluation.
+- [ ] Save benchmark outputs as JSON or CSV under `results/benchmarks/`.
+- [ ] Aggregate mean and standard deviation for success, collision, timeout, return, episode length, obstacle proximity, and action diagnostics.
+- [ ] Re-run random, heuristic, and PPO V1 evaluations on the same seed matrix.
+- [ ] Update `docs/benchmarks/` with the multi-seed V1 results.
 
-## Baselines
+## V2: PPO Training Improvements
 
-- [x] Add a random-policy evaluation script.
-- [x] Add a target-seeking heuristic baseline.
-- [x] Record baseline metrics: success rate, collision rate, timeout rate, mean return, and mean episode length.
+- [ ] Add vectorized environment support for faster and less correlated rollouts.
+- [ ] Evaluate observation normalization for the partial-visibility observation vector.
+- [ ] Test learning-rate annealing against the current fixed learning rate.
+- [ ] Compare deterministic and sampled evaluation to detect brittle argmax policies.
+- [ ] Track value explained variance or another value-function quality diagnostic.
 
-## PPO Implementation
+## V2: External Baseline
 
-- [x] Choose the neural network dependency: PyTorch.
-- [x] Implement a Bernoulli policy network for the multi-binary action space.
-- [x] Implement a value network or shared actor-critic network.
-- [x] Implement rollout buffer storage.
-- [x] Implement environment rollout collection.
-- [x] Implement return and advantage computation.
-- [x] Implement PPO clipped policy loss.
-- [x] Implement value loss and entropy bonus.
-- [x] Add mini-batch optimization over collected rollouts.
-- [x] Add checkpoint save/load.
-- [x] Add unit tests for actor-critic outputs.
-- [x] Add unit tests for buffer shapes and GAE math.
-- [x] Add unit tests for environment rollout collection.
-- [x] Add unit tests for loss outputs.
+- [ ] Add an optional Stable-Baselines3 PPO comparison after the custom implementation remains the primary path.
+- [ ] Keep the external baseline in a separate script or optional dependency group.
+- [ ] Compare SB3 and from-scratch PPO on the same environment, seeds, and metrics.
 
-## Training and Evaluation
+## V2: Documentation
 
-- [x] Add `train_ppo.py`.
-- [x] Add `evaluate_ppo.py`.
-- [x] Save metrics to disk.
-- [x] Add plots for returns, success rate, entropy, value loss, policy loss, and approximate KL.
-- [x] Render or record a trained policy run.
-- [x] Add optional KL early stopping when approximate KL exceeds a configured target.
-
-## Documentation
-
-- [x] Update README with PPO training commands.
-- [x] Document how the code maps to the PPO paper.
-- [x] Add first reproducible training result.
-- [x] Add a preview GIF or video after training is stable.
+- [ ] Refresh the README benchmark table after the multi-seed run.
+- [ ] Document the benchmark matrix commands and expected output files.
+- [ ] Keep `ROADMAP.md` aligned with the active V2 plan.

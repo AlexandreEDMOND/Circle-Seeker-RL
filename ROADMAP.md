@@ -1,60 +1,89 @@
 # Roadmap
 
-This roadmap is focused on implementing PPO from the paper
-`paper/Proximal Policy Optimization Algorithms.pdf`
-and using Circle Seeker as the first training environment.
+Circle Seeker RL reached its first complete implementation milestone with
+`v1.0.0`: a custom 2D environment, Gymnasium wrapper, from-scratch PPO training
+loop, structured action policy, reproducible commands, tests, and visual
+artifacts.
 
-## Phase 1: Environment Contract
+The next roadmap is focused on making the PPO results easier to reproduce,
+compare, and improve without expanding the project beyond its small inspectable
+scope.
 
-Goal: make the environment reliable enough for training loops.
+## V1: Complete PPO Workflow
 
-- Convert or wrap `CircleSeekEnv` as a real `gymnasium.Env`.
-- Define explicit `observation_space` and `action_space`.
-- Keep deterministic reset behavior through seeds.
-- Add tests for space shapes, action validity, termination, truncation, and reward ranges.
-- Add a deterministic evaluation mode so PPO progress can be measured consistently.
+Status: complete and tagged as `v1.0.0`.
 
-## Phase 2: Baselines and Metrics
+Delivered:
 
-Goal: establish what PPO must beat.
+- deterministic Circle Seeker environment with moving obstacles and cone vision
+- Gymnasium-compatible wrapper with explicit observation and action spaces
+- random and target-seeking heuristic baselines
+- from-scratch PPO implementation with rollout collection, GAE, clipped policy loss, value loss, entropy bonus, gradient clipping, KL diagnostics, and checkpointing
+- structured categorical PPO action policy that avoids contradictory movement and turn actions
+- periodic evaluation and best-checkpoint selection
+- training metrics, plotting script, README media, and benchmark notes
+- unit tests and GitHub Actions CI
 
-- Record random-policy success rate, collision rate, timeout rate, mean return, and mean episode length.
-- Add a simple scripted heuristic baseline that moves toward the target.
-- Save baseline results in a reproducible format such as JSON or CSV.
+## Phase 1: Benchmark Reproducibility
 
-## Phase 3: PPO Core
+Goal: turn the V1 snapshot into repeatable evidence.
 
-Goal: implement the algorithm in readable, inspectable modules.
+- Add a script that runs train/evaluate matrices across multiple train and eval seeds.
+- Store raw per-run metrics under `results/benchmarks/`.
+- Add an aggregation step for mean and standard deviation by policy and config.
+- Re-run random, heuristic, and PPO V1 using the same obstacle-heavy environment settings.
+- Update benchmark docs with the aggregate table and exact commands.
 
-- Add a policy/value network for discrete actions.
-- Add a rollout buffer with observations, actions, rewards, dones, values, log probabilities, and advantages.
-- Implement Generalized Advantage Estimation (GAE).
-- Implement the PPO clipped surrogate policy loss.
-- Add value loss, entropy bonus, gradient clipping, and mini-batch updates.
-- Add tests for GAE, discounted returns, buffer shapes, and PPO loss tensor shapes.
+Success criteria:
 
-## Phase 4: Training Pipeline
+- A single command can reproduce the benchmark matrix.
+- The benchmark report includes raw output paths, seed lists, and aggregate metrics.
+- PPO V1 is compared against the heuristic baseline on more than one seed.
 
-Goal: train a first PPO agent end to end.
+## Phase 2: Training Throughput
 
-- Add a CLI training script with configurable seed, total timesteps, learning rate, rollout length, batch size, epochs, gamma, lambda, clip range, value coefficient, and entropy coefficient.
-- Save checkpoints and training metrics.
-- Add evaluation during training using fixed seeds.
-- Keep one minimal default config that can run locally without extra setup.
+Goal: make PPO experiments faster and less noisy before deeper tuning.
 
-## Phase 5: Analysis and Comparison
+- Add vectorized environment rollout collection while keeping the single-env path readable.
+- Keep checkpoint and metric formats compatible with V1 where practical.
+- Measure wall-clock time and sample throughput for single-env vs vectorized runs.
 
-Goal: verify whether the implementation behaves like PPO should.
+Success criteria:
 
-- Plot training curves for return, success rate, losses, entropy, and approximate KL.
-- Compare the from-scratch PPO agent against random and heuristic baselines.
-- Optionally compare against Stable-Baselines3 PPO after the custom implementation works.
-- Save example gameplay videos or GIFs for trained policies.
+- Vectorized training passes the existing PPO tests plus focused rollout-shape tests.
+- A short benchmark documents the speedup and confirms comparable evaluation behavior.
 
-## Phase 6: Documentation
+## Phase 3: PPO Quality Diagnostics
 
-Goal: make the implementation explainable.
+Goal: understand why a training run succeeds or fails.
 
-- Document how each PPO component maps to the paper.
-- Add command examples for training, evaluation, plotting, and rendering a trained policy.
-- Update the README with first results once PPO training is stable.
+- Track value-function quality, such as explained variance.
+- Compare sampled and deterministic evaluation for the same checkpoint.
+- Add optional observation normalization experiments.
+- Test learning-rate annealing against the fixed V1 learning rate.
+
+Success criteria:
+
+- Checkpoints contain enough metrics to explain policy collapse, excessive turning, unsafe obstacle proximity, or weak value learning.
+- Each training change is evaluated against the V1 benchmark matrix before being kept.
+
+## Phase 4: External Reference Baseline
+
+Goal: compare the from-scratch PPO implementation against a mature PPO implementation.
+
+- Add Stable-Baselines3 as an optional baseline path, not a replacement for the custom PPO code.
+- Use the same Gymnasium environment, seeds, obstacle settings, and evaluation metrics.
+- Document differences in action modeling, normalization, and training defaults.
+
+Success criteria:
+
+- The project can show where the custom implementation is competitive and where it differs from a standard PPO baseline.
+- The external baseline remains isolated from the core from-scratch implementation.
+
+## Phase 5: Documentation Refresh
+
+Goal: keep the public project state accurate as V2 work lands.
+
+- Update the README benchmark table after aggregate V2 results exist.
+- Keep release notes in `CHANGELOG.md`.
+- Keep this roadmap and `TODO.md` focused on active work, not completed V1 history.

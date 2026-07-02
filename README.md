@@ -330,6 +330,7 @@ The Gymnasium wrapper exposes finite observation bounds for these values and sup
 │   └── Proximal Policy Optimization Algorithms.pdf
 ├── ROADMAP.md
 ├── TODO.md
+├── CHANGELOG.md
 ├── LICENSE
 ├── pyproject.toml
 ├── requirements.txt
@@ -394,9 +395,13 @@ The PPO implementation target is:
 
 ## Roadmap
 
-The implementation roadmap now targets a from-scratch PPO implementation for this environment.
+The `v1.0.0` milestone covers the first complete from-scratch PPO workflow.
+The active roadmap now targets reproducible multi-seed benchmarks, training
+throughput, PPO diagnostics, and an optional Stable-Baselines3 reference
+comparison.
 
-See `ROADMAP.md` for the staged plan and `TODO.md` for the current task list.
+See `ROADMAP.md` for the staged V2 plan, `TODO.md` for the current task list,
+and `CHANGELOG.md` for release notes.
 
 ## License
 
